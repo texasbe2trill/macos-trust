@@ -16,11 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Context-aware risk assessment with vendor intelligence
 - Beautiful terminal output with Rich library
 - JSON export functionality
+- SARIF 2.1.0 output format for CI/CD integration
 - Progress indicators for long-running scans
 - Filtering by risk level (`--min-risk`)
 - Vendor grouping (`--group-by-vendor`)
 - Vendor exclusion (`--exclude-vendor`)
-- Comprehensive test suite with 21 tests
+- Comprehensive test suite with 23 tests
 - Type hints throughout codebase
 - Full documentation (README, CONTRIBUTING)
 

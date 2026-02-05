@@ -339,5 +339,133 @@ class TestOutput(unittest.TestCase):
         self.assertIn("macOS Trust Scanner", output)
 
 
+class TestSARIFOutput(unittest.TestCase):
+    """Test SARIF output rendering."""
+    
+    def test_render_sarif_structure(self):
+        """Test SARIF 2.1.0 rendering with multiple findings."""
+        from macos_trust.output.sarif import render_sarif
+        from macos_trust.models import ScanReport, HostInfo, Finding, Risk
+        from datetime import datetime
+        
+        # Create test host
+        host = HostInfo(
+            hostname="test-host",
+            os_version="15.0",
+            build="24A5264n",
+            arch="arm64"
+        )
+        
+        # Create two test findings with different IDs and risk levels
+        finding1 = Finding(
+            id="test:finding:001",
+            category="app",
+            risk=Risk.HIGH,
+            title="Test High Risk Finding",
+            details="This is a high risk security issue for testing",
+            path="/Applications/Test.app",
+            evidence={"signature": "invalid", "team_id": "ABC123"},
+            recommendation="Remove or update the application"
+        )
+        
+        finding2 = Finding(
+            id="test:finding:002",
+            category="persistence",
+            risk=Risk.MED,
+            title="Test Medium Risk Finding",
+            details="This is a medium risk persistence issue",
+            path="/Library/LaunchDaemons/test.plist",
+            evidence={"type": "daemon", "state": "enabled"},
+            recommendation="Review and disable if not needed"
+        )
+        
+        # Create report with findings
+        report = ScanReport(
+            timestamp=datetime.now().isoformat(),
+            host=host,
+            findings=[finding1, finding2]
+        )
+        
+        # Render SARIF
+        sarif = render_sarif(report)
+        
+        # Verify SARIF version and schema
+        self.assertEqual(sarif["version"], "2.1.0")
+        self.assertEqual(
+            sarif["$schema"],
+            "https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json"
+        )
+        
+        # Verify runs structure
+        self.assertIn("runs", sarif)
+        self.assertEqual(len(sarif["runs"]), 1)
+        
+        run = sarif["runs"][0]
+        
+        # Verify tool metadata
+        self.assertIn("tool", run)
+        self.assertEqual(run["tool"]["driver"]["name"], "macos-trust")
+        self.assertEqual(
+            run["tool"]["driver"]["informationUri"],
+            "https://github.com/texasbe2trill/macos-trust"
+        )
+        self.assertIn("version", run["tool"]["driver"])
+        
+        # Verify rules are deduplicated (2 unique findings = 2 rules)
+        self.assertIn("rules", run["tool"]["driver"])
+        rules = run["tool"]["driver"]["rules"]
+        self.assertEqual(len(rules), 2)
+        
+        # Verify rule structure
+        rule_ids = [r["id"] for r in rules]
+        self.assertIn("test:finding:001", rule_ids)
+        self.assertIn("test:finding:002", rule_ids)
+        
+        for rule in rules:
+            self.assertIn("id", rule)
+            self.assertIn("name", rule)
+            self.assertIn("shortDescription", rule)
+            self.assertIn("fullDescription", rule)
+            self.assertIn("help", rule)
+        
+        # Verify results (2 findings = 2 results)
+        self.assertIn("results", run)
+        results = run["results"]
+        self.assertEqual(len(results), 2)
+        
+        # Verify level mapping
+        result_levels = {r["ruleId"]: r["level"] for r in results}
+        self.assertEqual(result_levels["test:finding:001"], "error")  # HIGH -> error
+        self.assertEqual(result_levels["test:finding:002"], "warning")  # MED -> warning
+        
+        # Verify result structure
+        for result in results:
+            self.assertIn("ruleId", result)
+            self.assertIn("level", result)
+            self.assertIn("message", result)
+            self.assertIn("properties", result)
+            self.assertIn("locations", result)
+            
+            # Verify properties include category, risk, evidence
+            props = result["properties"]
+            self.assertIn("category", props)
+            self.assertIn("risk", props)
+            self.assertIn("evidence", props)
+            
+            # Verify evidence values are strings
+            for value in props["evidence"].values():
+                self.assertIsInstance(value, str)
+    
+    def test_sarif_level_mapping(self):
+        """Test Risk to SARIF level mapping."""
+        from macos_trust.output.sarif import _risk_to_sarif_level
+        from macos_trust.models import Risk
+        
+        self.assertEqual(_risk_to_sarif_level(Risk.HIGH), "error")
+        self.assertEqual(_risk_to_sarif_level(Risk.MED), "warning")
+        self.assertEqual(_risk_to_sarif_level(Risk.LOW), "note")
+        self.assertEqual(_risk_to_sarif_level(Risk.INFO), "note")
+
+
 if __name__ == "__main__":
     unittest.main()

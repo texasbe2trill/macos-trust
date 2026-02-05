@@ -9,6 +9,7 @@ import typer
 
 from macos_trust.engine import run_scan
 from macos_trust.output.render import render_human, render_json
+from macos_trust.output.sarif import write_sarif
 from macos_trust.models import Risk
 from macos_trust.vendors import KNOWN_VENDORS
 
@@ -23,6 +24,11 @@ def scan(
         None,
         "--out",
         help="Write output to file instead of stdout"
+    ),
+    sarif: Optional[Path] = typer.Option(
+        None,
+        "--sarif",
+        help="Write SARIF 2.1.0 format output to specified file"
     ),
     min_risk: Optional[str] = typer.Option(
         None,
@@ -51,6 +57,7 @@ def scan(
     
     By default, outputs a human-readable report to stdout showing MED and HIGH risk findings.
     Use --json for machine-readable JSON output.
+    Use --sarif to write SARIF 2.1.0 format for CI/CD integration.
     Use --out to write results to a file.
     Use --min-risk to filter by severity (e.g., --min-risk HIGH shows only HIGH).
     Use --exclude-vendor to hide findings from known vendors (e.g., --exclude-vendor UBF8T346G9).
@@ -64,6 +71,7 @@ def scan(
         macos-trust --exclude-vendor UBF8T346G9        # Exclude Microsoft findings
         macos-trust --group-by-vendor                  # Group by vendor
         macos-trust --json --out report.json           # Save JSON report
+        macos-trust --sarif findings.sarif             # Save SARIF report for CI/CD
     """
     # Check if running on macOS
     if platform.system() != "Darwin":
@@ -123,6 +131,19 @@ def scan(
         print(f"Rendering failed: {e}", file=sys.stderr)
         sys.exit(3)
     
+    # Write SARIF output if requested
+    if sarif:
+        try:
+            # Ensure parent directory exists
+            if not sarif.parent.exists():
+                print(f"Error: Directory does not exist: {sarif.parent}", file=sys.stderr)
+                sys.exit(2)
+            write_sarif(str(sarif), filtered_report)
+            print(f"✓ SARIF report written to {sarif}", file=sys.stderr)
+        except Exception as e:
+            print(f"SARIF output failed: {e}", file=sys.stderr)
+            sys.exit(3)
+    
     # Write output to file or stdout
     try:
         if out:
@@ -133,8 +154,12 @@ def scan(
             out.write_text(output)
             print(f"✓ Report written to {out}", file=sys.stderr)
         else:
-            # Print to stdout
-            print(output)
+            # Print to stdout (unless only SARIF was requested)
+            if not sarif or json:
+                print(output)
+            elif sarif and not out:
+                # SARIF only, still show human output to stdout
+                print(output)
     except Exception as e:
         print(f"Output failed: {e}", file=sys.stderr)
         sys.exit(3)

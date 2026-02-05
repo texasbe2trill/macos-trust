@@ -193,6 +193,7 @@ Usage: macos-trust [OPTIONS]
 Options:
   --json                    Output results in JSON format
   --out PATH               Write output to file instead of stdout
+  --sarif PATH             Write SARIF 2.1.0 format to file (for CI/CD)
   --min-risk LEVEL         Filter by minimum risk level (INFO, LOW, MED, HIGH)
   --exclude-vendor TEAM_ID Exclude findings from specific vendor (repeatable)
   --verbose, -v            Show all findings including INFO level
@@ -214,10 +215,105 @@ macos-trust --group-by-vendor --verbose
 
 # Generate JSON report for CI/CD
 macos-trust --json --min-risk HIGH --out report.json
+
+# Generate SARIF output for GitHub Advanced Security / security tools
+macos-trust --sarif findings.sarif
+
+# SARIF with filtered results and human output to stdout
+macos-trust --min-risk MED --sarif security-report.sarif
 ```
 
----
+### SARIF Output
 
+SARIF (Static Analysis Results Interchange Format) is a standard format for static analysis tools. The `--sarif` option writes findings in SARIF 2.1.0 format, which is compatible with:
+
+- **GitHub Advanced Security** (Code Scanning)
+- **Azure DevOps** security pipelines
+- **GitLab** security dashboards
+- **VS Code** and other IDEs with SARIF support
+- CI/CD security scanning tools
+
+SARIF output includes:
+- Tool metadata with version information
+- Deduplicated rules for each unique finding type
+- Results with risk-based severity levels (HIGH → error, MED → warning, LOW/INFO → note)
+- File locations for each finding
+- Full evidence and recommendation details
+
+```bash
+# Generate SARIF and upload to GitHub Advanced Security
+macos-trust --sarif results.sarif
+gh api repos/$REPO/code-scanning/sarifs -F sarif=@results.sarif -F commit_sha=$SHA
+```
+
+#### GitHub Actions Workflow Example
+
+Here's an example workflow for running macos-trust and uploading results to GitHub Code Scanning. Add this to `.github/workflows/macos-security.yml`:
+
+```yaml
+name: macOS Security Scan
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run weekly on Mondays at 9 AM UTC
+    - cron: '0 9 * * 1'
+
+jobs:
+  security-scan:
+    name: Scan macOS Security
+    runs-on: macos-latest
+    permissions:
+      # Required for uploading SARIF results
+      security-events: write
+      # Required for private repos
+      contents: read
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Install macos-trust
+        run: |
+          pip install git+https://github.com/texasbe2trill/macos-trust.git
+      
+      - name: Run security scan
+        run: |
+          macos-trust --sarif macos-security.sarif --min-risk MED
+        continue-on-error: true
+      
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: macos-security.sarif
+          category: macos-trust
+        # Only upload if SARIF file was created
+        if: always() && hashFiles('macos-security.sarif') != ''
+      
+      - name: Upload SARIF as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sarif-results
+          path: macos-security.sarif
+        if: always()
+```
+
+**Notes:**
+- Requires GitHub Advanced Security for private repositories
+- Works on public repositories without additional licensing
+- Results appear in the **Security** → **Code scanning** tab
+- The `continue-on-error: true` ensures workflow continues even if findings are detected
+- Adjust `--min-risk` to control severity threshold
+
+---
 ## Architecture
 
 The tool is organized into focused modules:
@@ -274,7 +370,8 @@ Findings from recognized vendors receive appropriate risk levels and context-spe
 - ✅ Grouped output by vendor/developer
 - ✅ Progress indicators and verbose output mode
 - ✅ JSON export for automation and CI/CD
-- ✅ Comprehensive test suite (21 tests, 100% passing)
+- ✅ SARIF 2.1.0 output format for CI/CD integration
+- ✅ Comprehensive test suite (23 tests, 100% passing)
 - ✅ Security audit and automated vulnerability scanning
 - ✅ GitHub Actions workflows for testing and security
 - ✅ Full contribution guidelines and issue templates
@@ -284,7 +381,6 @@ Findings from recognized vendors receive appropriate risk levels and context-spe
 - Baseline & diff mode to track changes over time
 - Configuration file support (`~/.macos-trust.yaml`)
 - Performance improvements with parallel scanning
-- SARIF output format for enhanced CI/CD integration
 - Entitlements analysis for permission auditing
 - Browser extension scanning
 - Kernel extension detection
