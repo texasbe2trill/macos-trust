@@ -28,7 +28,7 @@ This project follows a simple code of conduct:
 ### Prerequisites
 
 - macOS 10.15 or later
-- Python 3.9 or later
+- Python 3.10 or later
 - Git
 
 ### Development Setup
