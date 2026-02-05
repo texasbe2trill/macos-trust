@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-02-05
+
+### Added
+- SARIF 2.1.0 output format support (`--sarif` option)
+- GitHub Actions workflow example for Code Scanning integration
+- Comprehensive SARIF tests validating structure and level mapping
+- SARIF documentation in README with usage examples
+
+### Changed
+- Test suite expanded from 21 to 23 tests
+- README updated with SARIF integration examples
+- CHANGELOG updated to reflect SARIF feature
+
+## [0.1.0] - 2026-02-05
+
 ### Added
 - Initial release of macos-trust security scanner
 - Application scanning with code signature verification
@@ -16,30 +31,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Context-aware risk assessment with vendor intelligence
 - Beautiful terminal output with Rich library
 - JSON export functionality
-- SARIF 2.1.0 output format for CI/CD integration
 - Progress indicators for long-running scans
 - Filtering by risk level (`--min-risk`)
 - Vendor grouping (`--group-by-vendor`)
 - Vendor exclusion (`--exclude-vendor`)
-- Comprehensive test suite with 23 tests
+- Comprehensive test suite with 21 tests
 - Type hints throughout codebase
 - Full documentation (README, CONTRIBUTING)
+- Core scanning engine
+- Security rules engine
+- CLI interface
+- Vendor database with major software companies
+- MIT License
 
 ### Security
 - Read-only operations, no system modifications
 - No network calls or telemetry
 - Runs with user privileges only
-
-## [0.1.0] - 2026-02-05
-
-### Added
-- Initial development version
-- Core scanning engine
-- Security rules engine
-- Output formatters
-- CLI interface
-- Vendor database with major software companies
-- MIT License
 
 ---
 

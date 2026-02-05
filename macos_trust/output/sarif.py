@@ -56,7 +56,7 @@ def render_sarif(report: ScanReport) -> dict:
         SARIF document as a dictionary (ready for JSON serialization)
     """
     # Get package version from pyproject.toml or default
-    version = "0.1.0"
+    version = "0.2.0"
     
     # Deduplicate rules
     rules_map = _dedupe_rules(report.findings)
