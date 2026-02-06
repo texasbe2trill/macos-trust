@@ -7,13 +7,21 @@ from macos_trust.vendors import (
     is_system_helper_path,
     is_user_writable_path as is_user_writable_location
 )
+from macos_trust.context import (
+    AppContext,
+    parse_quarantine_source,
+    is_homebrew_quarantine,
+    should_trust_by_age
+)
+from macos_trust.config import Config
 
 
 def analyze_app(
     app: dict,
     codesign_result: dict | None = None,
     spctl_result: dict | None = None,
-    quarantine_result: dict | None = None
+    quarantine_result: dict | None = None,
+    config: Config | None = None
 ) -> list[Finding]:
     """
     Analyze an application and generate security findings.
@@ -23,6 +31,7 @@ def analyze_app(
         codesign_result: Result from collectors.codesign.codesign_verify()
         spctl_result: Result from collectors.spctl.spctl_assess()
         quarantine_result: Result from collectors.quarantine.get_quarantine()
+        config: Configuration for trust and risk adjustments
     
     Returns:
         List of Finding objects for security issues detected
@@ -38,12 +47,28 @@ def analyze_app(
     is_signed = codesign_result and codesign_result.get("status") == "ok"
     known_vendor = is_known_vendor(team_id) if team_id else False
     
+    # Check if vendor is in config's trusted list
+    if config and team_id and team_id in config.trusted_vendors:
+        known_vendor = True
+    
+    # Get enriched context
+    app_context = AppContext(path) if path else None
+    
     # Rule 1: Invalid code signature
     if codesign_result and codesign_result.get("status") == "fail":
         # Adjust risk based on context
         risk = Risk.HIGH
         if known_vendor:
             risk = Risk.MED  # Known vendor but invalid signature - concerning but less critical
+        
+        # Further adjust based on app context
+        if app_context:
+            # App Store apps with invalid signatures are still concerning (MED)
+            if app_context.is_app_store:
+                risk = Risk.MED
+            # Old apps that have been stable might have expired certs
+            elif config and config.trust_old_apps and app_context.age_days >= config.old_app_days:
+                risk = Risk.LOW
         
         finding = _create_codesign_fail_finding(
             app=app,
@@ -63,6 +88,10 @@ def analyze_app(
         if is_signed and known_vendor:
             risk = Risk.MED
         
+        # App Store apps shouldn't be rejected, but if they are, still MED
+        if app_context and app_context.is_app_store:
+            risk = Risk.MED
+        
         finding = _create_spctl_rejected_finding(
             app=app,
             spctl_result=spctl_result,
@@ -72,14 +101,23 @@ def analyze_app(
         )
         findings.append(finding)
     
-    # Rule 3: Quarantined but not auto-run -> LOW
+    # Rule 3: Quarantined but not auto-run -> LOW (context-aware)
     if quarantine_result and quarantine_result.get("is_quarantined") == "true":
-        finding = _create_quarantined_app_finding(
-            app=app,
-            quarantine_result=quarantine_result,
-            finding_id=f"app:{app_id_base}:quarantined"
-        )
-        findings.append(finding)
+        risk = Risk.LOW
+        quarantine_value = quarantine_result.get("value", "")
+        
+        # Check quarantine source
+        if config and config.trust_homebrew_cask and is_homebrew_quarantine(quarantine_value):
+            # Skip quarantine findings for Homebrew Cask if configured
+            pass
+        else:
+            finding = _create_quarantined_app_finding(
+                app=app,
+                quarantine_result=quarantine_result,
+                finding_id=f"app:{app_id_base}:quarantined",
+                quarantine_source=parse_quarantine_source(quarantine_value)
+            )
+            findings.append(finding)
     
     # Rule 4: Fully verified by known vendor -> INFO
     if is_signed and known_vendor and codesign_result and spctl_result and spctl_result.get("status") == "accepted":
@@ -99,7 +137,8 @@ def analyze_launchd(
     launchd_item: dict,
     codesign_result: dict | None = None,
     spctl_result: dict | None = None,
-    quarantine_result: dict | None = None
+    quarantine_result: dict | None = None,
+    config: Config | None = None
 ) -> list[Finding]:
     """
     Analyze a launch agent/daemon and generate security findings.
@@ -109,6 +148,7 @@ def analyze_launchd(
         codesign_result: Result from collectors.codesign.codesign_verify()
         spctl_result: Result from collectors.spctl.spctl_assess()
         quarantine_result: Result from collectors.quarantine.get_quarantine()
+        config: Configuration for trust and risk adjustments
     
     Returns:
         List of Finding objects for security issues detected
@@ -127,6 +167,10 @@ def analyze_launchd(
     is_signed = codesign_result and codesign_result.get("status") == "ok"
     known_vendor = is_known_vendor(team_id) if team_id else False
     is_helper = is_system_helper_path(program)
+    
+    # Check if vendor is in config's trusted list
+    if config and team_id and team_id in config.trusted_vendors:
+        known_vendor = True
     
     # Rule 1: Invalid code signature
     if codesign_result and codesign_result.get("status") == "fail":
@@ -179,23 +223,30 @@ def analyze_launchd(
     run_at_load = launchd_item.get("run_at_load", False)
     
     if quarantine_result and quarantine_result.get("is_quarantined") == "true":
-        if run_at_load:
-            finding = _create_quarantined_persistence_finding(
-                launchd_item=launchd_item,
-                quarantine_result=quarantine_result,
-                finding_id=f"{persistence_id_base}:quarantined",
-                run_at_load=True
-            )
-            findings.append(finding)
+        quarantine_value = quarantine_result.get("value", "")
+        
+        # Check if Homebrew source and config trusts it
+        if config and config.trust_homebrew_cask and is_homebrew_quarantine(quarantine_value):
+            # Skip quarantine finding for Homebrew items if configured
+            pass
         else:
-            # Quarantined but not auto-run -> LOW
-            finding = _create_quarantined_persistence_finding(
-                launchd_item=launchd_item,
-                quarantine_result=quarantine_result,
-                finding_id=f"{persistence_id_base}:quarantined_only",
-                run_at_load=False
-            )
-            findings.append(finding)
+            if run_at_load:
+                finding = _create_quarantined_persistence_finding(
+                    launchd_item=launchd_item,
+                    quarantine_result=quarantine_result,
+                    finding_id=f"{persistence_id_base}:quarantined",
+                    run_at_load=True
+                )
+                findings.append(finding)
+            else:
+                # Quarantined but not auto-run -> LOW
+                finding = _create_quarantined_persistence_finding(
+                    launchd_item=launchd_item,
+                    quarantine_result=quarantine_result,
+                    finding_id=f"{persistence_id_base}:quarantined_only",
+                    run_at_load=False
+                )
+                findings.append(finding)
     
     return findings
 
@@ -382,11 +433,32 @@ def _create_quarantined_persistence_finding(
 def _create_quarantined_app_finding(
     app: dict,
     quarantine_result: dict,
-    finding_id: str
+    finding_id: str,
+    quarantine_source: str | None = None
 ) -> Finding:
     """Create a finding for quarantined application."""
     name = app.get("name", "Unknown")
     path = app.get("exec_path") or app.get("app_path", "")
+    
+    # Enhance recommendation with source info
+    recommendation = (
+        "Review this application. If it's legitimate software you downloaded, "
+        "you can remove the quarantine attribute by running it or using: xattr -d com.apple.quarantine"
+    )
+    
+    if quarantine_source:
+        recommendation = (
+            f"This app was downloaded via {quarantine_source}. "
+            "If it's legitimate software you intentionally downloaded, "
+            "you can remove the quarantine attribute by running it or using: xattr -d com.apple.quarantine"
+        )
+    
+    evidence = {
+        "quarantine_value": quarantine_result.get("value", "")[:100],
+    }
+    
+    if quarantine_source:
+        evidence["quarantine_source"] = quarantine_source
     
     return Finding(
         id=finding_id,
@@ -398,13 +470,8 @@ def _create_quarantined_app_finding(
             "it was downloaded and hasn't been explicitly approved for execution yet."
         ),
         path=path,
-        evidence={
-            "quarantine_value": quarantine_result.get("value", "")[:100],
-        },
-        recommendation=(
-            "Review this application. If it's legitimate software you downloaded, "
-            "you can remove the quarantine attribute by running it or using: xattr -d com.apple.quarantine"
-        )
+        evidence=evidence,
+        recommendation=recommendation
     )
 
 

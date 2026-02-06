@@ -1,6 +1,8 @@
 """Main scan engine orchestrating the security assessment."""
 
+import re
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
@@ -13,11 +15,16 @@ from macos_trust.collectors.codesign import codesign_verify
 from macos_trust.collectors.spctl import spctl_assess
 from macos_trust.collectors.quarantine import get_quarantine
 from macos_trust.rules import analyze_app, analyze_launchd
+from macos_trust.config import Config
 
 
-def run_scan() -> ScanReport:
+def run_scan(config: Config | None = None, parallel: bool = False) -> ScanReport:
     """
     Execute a complete security scan of the macOS system.
+    
+    Args:
+        config: Configuration for scan behavior and filtering
+        parallel: Enable parallel processing for faster scans (may use more CPU)
     
     Returns:
         ScanReport containing host information and security findings
@@ -36,12 +43,16 @@ def run_scan() -> ScanReport:
     all_findings: list[Finding] = []
     
     # Scan applications
-    app_findings = _scan_and_analyze_apps()
+    app_findings = _scan_and_analyze_apps(config, parallel=parallel)
     all_findings.extend(app_findings)
     
     # Scan launch agents/daemons
-    launchd_findings = _scan_and_analyze_launchd()
+    launchd_findings = _scan_and_analyze_launchd(config, parallel=parallel)
     all_findings.extend(launchd_findings)
+    
+    # Apply config-based filtering
+    if config:
+        all_findings = _apply_config_filters(all_findings, config)
     
     # Sort findings by risk level (highest first), then by title
     sorted_findings = sorted(all_findings, key=lambda f: (f.risk, f.title))
@@ -57,9 +68,31 @@ def run_scan() -> ScanReport:
     return report
 
 
-def _scan_and_analyze_apps() -> list[Finding]:
+def _apply_config_filters(findings: list[Finding], config: Config) -> list[Finding]:
+    """Apply configuration-based filtering to findings."""
+    filtered = []
+    
+    for finding in findings:
+        # Check ignore_findings list
+        if finding.id in config.ignore_findings:
+            continue
+        
+        # Check ignore_patterns (regex)
+        if any(re.match(pattern, finding.id) for pattern in config.ignore_patterns):
+            continue
+        
+        filtered.append(finding)
+    
+    return filtered
+
+
+def _scan_and_analyze_apps(config: Config | None = None, parallel: bool = False) -> list[Finding]:
     """
     Scan all applications and generate findings.
+    
+    Args:
+        config: Configuration for scan behavior
+        parallel: Enable parallel processing for faster scans
     
     Returns:
         List of findings from application analysis
@@ -87,6 +120,19 @@ def _scan_and_analyze_apps() -> list[Finding]:
         return findings
     
     # Analyze applications with progress bar
+    if parallel:
+        findings = _analyze_apps_parallel(apps, config, console)
+    else:
+        findings = _analyze_apps_sequential(apps, config, console)
+    
+    console.print("[green]✓[/green] Application analysis complete\n")
+    return findings
+
+
+def _analyze_apps_sequential(apps: list[dict], config: Config | None, console: Console) -> list[Finding]:
+    """Analyze apps sequentially (original behavior)."""
+    findings: list[Finding] = []
+    
     with Progress(
         SpinnerColumn(),
         TextColumn("[bold cyan]{task.description}"),
@@ -103,7 +149,7 @@ def _scan_and_analyze_apps() -> list[Finding]:
             progress.update(task, description=f"Analyzing [cyan]{app_name}[/cyan]...")
             
             try:
-                app_findings = _analyze_single_app(app)
+                app_findings = _analyze_single_app(app, config)
                 findings.extend(app_findings)
             except Exception:
                 # Skip this app if analysis fails completely
@@ -112,16 +158,61 @@ def _scan_and_analyze_apps() -> list[Finding]:
             
             progress.advance(task)
     
-    console.print("[green]✓[/green] Application analysis complete\n")
     return findings
 
 
-def _analyze_single_app(app: dict) -> list[Finding]:
+def _analyze_apps_parallel(apps: list[dict], config: Config | None, console: Console) -> list[Finding]:
+    """Analyze apps in parallel using thread pool."""
+    findings: list[Finding] = []
+    max_workers = min(8, len(apps))  # Limit to 8 concurrent threads
+    completed = 0
+    
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold cyan]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeRemainingColumn(),
+        console=console,
+        transient=False
+    ) as progress:
+        task = progress.add_task(f"Analyzing {len(apps)} applications...", total=len(apps))
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks
+            future_to_app = {
+                executor.submit(_analyze_single_app, app, config): app 
+                for app in apps
+            }
+            
+            # Process results as they complete
+            for future in as_completed(future_to_app):
+                app = future_to_app[future]
+                app_name = app.get('name', 'Unknown')
+                completed += 1
+                
+                # Update description to show last completed app
+                progress.update(task, description=f"Analyzed [cyan]{app_name}[/cyan] ({completed}/{len(apps)})...")
+                
+                try:
+                    app_findings = future.result()
+                    findings.extend(app_findings)
+                except Exception:
+                    # Skip this app if analysis fails
+                    pass
+                
+                progress.advance(task)
+    
+    return findings
+
+
+def _analyze_single_app(app: dict, config: Config | None = None) -> list[Finding]:
     """
     Analyze a single application with all collectors.
     
     Args:
         app: Application record from scan_applications()
+        config: Configuration for scan behavior
     
     Returns:
         List of findings for this application
@@ -160,7 +251,8 @@ def _analyze_single_app(app: dict) -> list[Finding]:
             app=app,
             codesign_result=codesign_result,
             spctl_result=spctl_result,
-            quarantine_result=quarantine_result
+            quarantine_result=quarantine_result,
+            config=config
         )
         return findings
     except Exception:
@@ -168,9 +260,13 @@ def _analyze_single_app(app: dict) -> list[Finding]:
         return []
 
 
-def _scan_and_analyze_launchd() -> list[Finding]:
+def _scan_and_analyze_launchd(config: Config | None = None, parallel: bool = False) -> list[Finding]:
     """
     Scan all launch agents/daemons and generate findings.
+    
+    Args:
+        config: Configuration for scan behavior
+        parallel: Enable parallel processing for faster scans
     
     Returns:
         List of findings from launchd analysis
@@ -197,6 +293,19 @@ def _scan_and_analyze_launchd() -> list[Finding]:
         return findings
     
     # Analyze launch items with progress bar
+    if parallel:
+        findings = _analyze_launchd_parallel(launchd_items, config, console)
+    else:
+        findings = _analyze_launchd_sequential(launchd_items, config, console)
+    
+    console.print("[green]✓[/green] LaunchD analysis complete\n")
+    return findings
+
+
+def _analyze_launchd_sequential(items: list[dict], config: Config | None, console: Console) -> list[Finding]:
+    """Analyze launch items sequentially."""
+    findings: list[Finding] = []
+    
     with Progress(
         SpinnerColumn(),
         TextColumn("[bold cyan]{task.description}"),
@@ -206,14 +315,14 @@ def _scan_and_analyze_launchd() -> list[Finding]:
         console=console,
         transient=False
     ) as progress:
-        task = progress.add_task(f"Analyzing launch items...", total=len(launchd_items))
+        task = progress.add_task(f"Analyzing launch items...", total=len(items))
         
-        for item in launchd_items:
+        for item in items:
             label = item.get('label', 'Unknown')
             progress.update(task, description=f"Analyzing [cyan]{label}[/cyan]...")
             
             try:
-                item_findings = _analyze_single_launchd(item)
+                item_findings = _analyze_single_launchd(item, config)
                 findings.extend(item_findings)
             except Exception:
                 # Skip this item if analysis fails completely
@@ -221,16 +330,58 @@ def _scan_and_analyze_launchd() -> list[Finding]:
             
             progress.advance(task)
     
-    console.print("[green]✓[/green] LaunchD analysis complete\n")
     return findings
 
 
-def _analyze_single_launchd(item: dict) -> list[Finding]:
+def _analyze_launchd_parallel(items: list[dict], config: Config | None, console: Console) -> list[Finding]:
+    """Analyze launch items in parallel using thread pool."""
+    findings: list[Finding] = []
+    max_workers = min(8, len(items))
+    completed = 0
+    
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold cyan]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeRemainingColumn(),
+        console=console,
+        transient=False
+    ) as progress:
+        task = progress.add_task(f"Analyzing {len(items)} launch items...", total=len(items))
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_item = {
+                executor.submit(_analyze_single_launchd, item, config): item
+                for item in items
+            }
+            
+            for future in as_completed(future_to_item):
+                item = future_to_item[future]
+                label = item.get('label', 'Unknown')
+                completed += 1
+                
+                # Update description to show last completed item
+                progress.update(task, description=f"Analyzed [cyan]{label}[/cyan] ({completed}/{len(items)})...")
+                
+                try:
+                    item_findings = future.result()
+                    findings.extend(item_findings)
+                except Exception:
+                    pass
+                
+                progress.advance(task)
+    
+    return findings
+
+
+def _analyze_single_launchd(item: dict, config: Config | None = None) -> list[Finding]:
     """
     Analyze a single launch agent/daemon with all collectors.
     
     Args:
         item: Launch item record from scan_launchd()
+        config: Configuration for scan behavior
     
     Returns:
         List of findings for this launch item
@@ -245,7 +396,8 @@ def _analyze_single_launchd(item: dict) -> list[Finding]:
                 launchd_item=item,
                 codesign_result=None,
                 spctl_result=None,
-                quarantine_result=None
+                quarantine_result=None,
+                config=config
             )
             return findings
         except Exception:
@@ -262,7 +414,8 @@ def _analyze_single_launchd(item: dict) -> list[Finding]:
                 launchd_item=item,
                 codesign_result=None,
                 spctl_result=None,
-                quarantine_result=None
+                quarantine_result=None,
+                config=config
             )
             return findings
         except Exception:
@@ -294,7 +447,8 @@ def _analyze_single_launchd(item: dict) -> list[Finding]:
             launchd_item=item,
             codesign_result=codesign_result,
             spctl_result=spctl_result,
-            quarantine_result=quarantine_result
+            quarantine_result=quarantine_result,
+            config=config
         )
         return findings
     except Exception:

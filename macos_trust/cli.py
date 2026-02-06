@@ -12,6 +12,8 @@ from macos_trust.output.render import render_human, render_json
 from macos_trust.output.sarif import write_sarif
 from macos_trust.models import Risk
 from macos_trust.vendors import KNOWN_VENDORS
+from macos_trust.config import Config, load_config, save_example_config
+from macos_trust.baseline import Baseline
 
 
 def scan(
@@ -50,6 +52,46 @@ def scan(
         False,
         "--group-by-vendor",
         help="Group findings by vendor/developer in output"
+    ),
+    config_file: Optional[Path] = typer.Option(
+        None,
+        "--config",
+        help="Path to configuration file (default: ~/.macos-trust.yaml)"
+    ),
+    save_baseline: bool = typer.Option(
+        False,
+        "--save-baseline",
+        help="Save current scan results as baseline for future diff mode"
+    ),
+    baseline_file: Optional[Path] = typer.Option(
+        None,
+        "--baseline-file",
+        help="Path to baseline file (default: from config or ~/.macos-trust/baseline.json)"
+    ),
+    diff_mode: bool = typer.Option(
+        False,
+        "--diff",
+        help="Show only new or changed findings since baseline (default if baseline exists)"
+    ),
+    show_all: bool = typer.Option(
+        False,
+        "--show-all",
+        help="Show all findings, not just diff (overrides diff mode)"
+    ),
+    trust_vendor: Optional[list[str]] = typer.Option(
+        None,
+        "--trust-vendor",
+        help="Add vendor Team ID to trusted list for this scan. Can be specified multiple times."
+    ),
+    generate_config: Optional[Path] = typer.Option(
+        None,
+        "--generate-config",
+        help="Generate example configuration file at specified path and exit"
+    ),
+    fast: bool = typer.Option(
+        False,
+        "--fast",
+        help="Enable parallel processing for faster scans (uses more CPU)"
     )
 ) -> None:
     """
@@ -63,6 +105,11 @@ def scan(
     Use --exclude-vendor to hide findings from known vendors (e.g., --exclude-vendor UBF8T346G9).
     Use --verbose to see all findings including INFO level.
     Use --group-by-vendor to organize output by developer/vendor.
+    Use --config to specify configuration file.
+    Use --save-baseline to save current results as baseline.
+    Use --diff to show only new/changed findings since baseline.
+    Use --trust-vendor to temporarily trust additional vendors.
+    Use --generate-config to create example config file.
     
     Examples:
         macos-trust                                    # Show MED and HIGH findings
@@ -72,13 +119,43 @@ def scan(
         macos-trust --group-by-vendor                  # Group by vendor
         macos-trust --json --out report.json           # Save JSON report
         macos-trust --sarif findings.sarif             # Save SARIF report for CI/CD
+        macos-trust --save-baseline                    # Save baseline
+        macos-trust --diff                             # Show only new findings
+        macos-trust --config custom.yaml               # Use custom config
+        macos-trust --trust-vendor H7H8Q7M5CK          # Trust Postman for this scan
+        macos-trust --generate-config ~/.macos-trust.yaml  # Create example config
     """
+    # Check if generating config
+    if generate_config:
+        try:
+            save_example_config(generate_config)
+            print(f"✓ Example configuration saved to {generate_config}", file=sys.stderr)
+            sys.exit(0)
+        except Exception as e:
+            print(f"Error generating config: {e}", file=sys.stderr)
+            sys.exit(2)
+    
     # Check if running on macOS
     if platform.system() != "Darwin":
         print("Error: This tool only works on macOS", file=sys.stderr)
         sys.exit(2)
     
-    # Parse min_risk option
+    # Load configuration
+    try:
+        config = load_config(config_file)
+    except Exception as e:
+        print(f"Error loading configuration: {e}", file=sys.stderr)
+        print("Continuing with default settings...", file=sys.stderr)
+        config = Config()
+    
+    # Apply CLI overrides to config
+    if trust_vendor:
+        config.trusted_vendors.extend(trust_vendor)
+    
+    if exclude_vendor:
+        config.exclude_vendors.extend(exclude_vendor)
+    
+    # Parse min_risk option (CLI overrides config)
     min_risk_level = None
     if min_risk:
         try:
@@ -87,26 +164,59 @@ def scan(
             print(f"Error: Invalid risk level '{min_risk}'. Must be one of: INFO, LOW, MED, HIGH", file=sys.stderr)
             sys.exit(2)
     elif not verbose:
-        # Default: show only MED and above
-        min_risk_level = Risk.MED
+        # Try config, otherwise default to MED
+        try:
+            min_risk_level = Risk[config.min_risk.upper()]
+        except (KeyError, AttributeError):
+            min_risk_level = Risk.MED
+    
+    # Determine baseline file path
+    baseline_path = baseline_file if baseline_file else Path(config.baseline_file).expanduser()
+    
+    # Initialize baseline
+    baseline = Baseline(baseline_path)
+    baseline_exists = baseline.load()
+    
+    # Determine if we should use diff mode
+    use_diff_mode = (diff_mode or baseline_exists) and not show_all
     
     # Run the scan
     try:
-        report = run_scan()
+        report = run_scan(config, parallel=fast)
     except Exception as e:
         print(f"Scan failed: {e}", file=sys.stderr)
         sys.exit(3)
     
+    # Save baseline if requested
+    if save_baseline:
+        try:
+            baseline.save(report)
+            print(f"✓ Baseline saved to {baseline_path} ({len(report.findings)} findings)", file=sys.stderr)
+            if not json and not sarif:
+                # Don't exit if also generating output
+                sys.exit(0)
+        except Exception as e:
+            print(f"Error saving baseline: {e}", file=sys.stderr)
+            sys.exit(3)
+    
     # Apply filters to findings
     filtered_findings = report.findings
+    
+    # Apply diff mode if enabled
+    if use_diff_mode and baseline_exists:
+        filtered_findings = baseline.filter_new_findings(filtered_findings)
+        if not json:
+            baseline_count = baseline.get_baseline_count()
+            new_count = len(filtered_findings)
+            print(f"ℹ️  Diff mode: Showing {new_count} new/changed findings (baseline has {baseline_count})", file=sys.stderr)
     
     # Filter by minimum risk level
     if min_risk_level:
         filtered_findings = [f for f in filtered_findings if f.risk >= min_risk_level]
     
     # Filter by excluded vendors
-    if exclude_vendor:
-        exclude_set = set(exclude_vendor)
+    if config.exclude_vendors:
+        exclude_set = set(config.exclude_vendors)
         filtered_findings = [
             f for f in filtered_findings
             if f.evidence.get("codesign_team_id", "") not in exclude_set

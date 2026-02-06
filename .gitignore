@@ -40,3 +40,13 @@ htmlcov/
 
 # macOS
 .DS_Store
+
+# Output files (contain sensitive scan data)
+security-report.json
+*.sarif
+baseline.json
+.macos-trust/
+
+# Internal documentation
+IMPLEMENTATION.md
+RELEASE_NOTES_*.md

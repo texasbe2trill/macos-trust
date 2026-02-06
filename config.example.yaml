@@ -1,0 +1,131 @@
+# macOS Trust Scanner - Example Configuration
+# Copy this file to ~/.macos-trust.yaml and customize for your needs
+
+# ==============================================================================
+# FILTERING & RISK LEVELS
+# ==============================================================================
+
+# Minimum risk level to report (INFO, LOW, MED, HIGH)
+# Default: MED (only show medium and high risk findings)
+min_risk: "MED"
+
+# ==============================================================================
+# TRUST SETTINGS
+# ==============================================================================
+
+# Trust App Store applications automatically
+# App Store apps are reviewed by Apple and generally safe
+trust_app_store: true
+
+# Trust apps downloaded via Homebrew Cask
+# Homebrew is a trusted package manager for macOS
+trust_homebrew_cask: true
+
+# Trust applications older than X days
+# Apps that have been running for a while without issues are likely safe
+trust_old_apps: true
+old_app_days: 30
+
+# ==============================================================================
+# VENDOR MANAGEMENT
+# ==============================================================================
+
+# Exclude findings from known trusted vendors (by Team ID)
+# These vendors' findings will be completely hidden from reports
+# Find Team IDs in scan output or by running: codesign -dv /path/to/app
+exclude_vendors:
+  - "UBF8T346G9"  # Microsoft Corporation
+  - "9BNSXJN65R"  # Docker Inc
+  # Add more as needed:
+  # - "BJ4HAAB9B3"  # Zoom Video Communications
+  # - "EQHXZ8M8AV"  # Slack Technologies
+  # - "6N38VWS5BX"  # Google LLC
+
+# Trusted vendors whose findings are downgraded from HIGH to MED risk
+# Useful for vendors you trust but still want to monitor
+trusted_vendors:
+  # - "H7H8Q7M5CK"  # Postman
+  # - "VEKTX9H2N7"  # GitHub
+  # - "U68MSDN6DR"  # Signal Foundation
+  # - "H7V7XYVQ7D"  # iTerm2
+
+# ==============================================================================
+# PATTERN-BASED FILTERING
+# ==============================================================================
+
+# Ignore findings matching these regex patterns
+# Useful for filtering out known false positives
+ignore_patterns:
+  # Example: Ignore all quarantine findings
+  # - ".*:quarantined$"
+  
+  # Example: Ignore Gatekeeper rejections for helper tools (they're not apps)
+  # - ".*:spctl_rejected$"
+  
+  # Example: Ignore specific app patterns
+  # - "app:com\\.example\\..*:.*"
+
+# ==============================================================================
+# SPECIFIC FINDING SUPPRESSION
+# ==============================================================================
+
+# Ignore specific findings by their exact ID
+# Get finding IDs from scan output (shown as "ID: ...")
+ignore_findings:
+  # Examples:
+  # - "app:com.example.app:codesign_fail"
+  # - "persistence:user:homebrew.mxcl.service:codesign_fail"
+  # - "persistence:daemon:com.example.helper:spctl_rejected"
+
+# ==============================================================================
+# BASELINE & DIFF MODE
+# ==============================================================================
+
+# Path to baseline file for tracking changes over time
+# Use --save-baseline to create initial baseline
+# Use --diff to show only new/changed findings
+baseline_file: "~/.macos-trust/baseline.json"
+
+# ==============================================================================
+# USAGE EXAMPLES
+# ==============================================================================
+#
+# 1. Generate this file:
+#    macos-trust --generate-config ~/.macos-trust.yaml
+#
+# 2. Run scan with config:
+#    macos-trust --config ~/.macos-trust.yaml
+#
+# 3. Save initial baseline:
+#    macos-trust --config ~/.macos-trust.yaml --save-baseline
+#
+# 4. Show only new findings:
+#    macos-trust --config ~/.macos-trust.yaml --diff
+#
+# 5. Fast scan with parallel processing:
+#    macos-trust --config ~/.macos-trust.yaml --fast
+#
+# 6. Show all findings (ignore baseline):
+#    macos-trust --config ~/.macos-trust.yaml --show-all
+#
+# ==============================================================================
+# COMMON VENDOR TEAM IDs
+# ==============================================================================
+#
+# Microsoft Corporation:    UBF8T346G9
+# Apple Inc:                9JA89QQLNQ
+# Google LLC:               EQHXZ8M8AV
+# Docker Inc:               9BNSXJN65R
+# Mozilla:                  43AQ936H96
+# Zoom Video Communications: BJ4HAAB9B3
+# Slack Technologies:       EQHXZ8M8AV
+# GitHub:                   VEKTX9H2N7
+# Signal Foundation:        U68MSDN6DR
+# Postman:                  H7H8Q7M5CK
+# iTerm2:                   H7V7XYVQ7D
+# Spotify:                  2FNC3A47ZF
+# Discord:                  53Q6R32WPB
+# Adobe:                    JQ525L2MZD
+#
+# Find more by running: codesign -dv /Applications/YourApp.app 2>&1 | grep TeamIdentifier
+#

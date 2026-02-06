@@ -7,6 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-02-06
+
+### Added
+- **Configuration file support** - Persistent settings via YAML config files
+  - Load from `~/.macos-trust.yaml` or custom path with `--config`
+  - Generate example config with `--generate-config`
+  - Includes `config.example.yaml` with comprehensive documentation
+- **Baseline & diff mode** - Track findings over time and show only changes
+  - Save baseline with `--save-baseline`
+  - Automatic diff mode with `--diff` flag
+  - Override with `--show-all` to force full scan results
+  - Baseline stored in `~/.macos-trust/baseline.json` (configurable)
+- **Context enrichment** - Smart risk assessment based on app source
+  - Quarantine source intelligence (Homebrew vs browser downloads)
+  - App Store detection via receipt validation
+  - Homebrew Cask integration (`brew list --cask`)
+  - Age-based trust for stable applications (30+ days)
+- **Advanced filtering** - Reduce false positives dramatically
+  - Trust Homebrew Cask downloads (`trust_homebrew_cask`)
+  - Trust App Store apps automatically (`trust_app_store`)
+  - Trust old/stable apps (`trust_old_apps`)
+  - Suppress findings by exact ID (`ignore_findings`)
+  - Suppress findings by regex pattern (`ignore_patterns`)
+  - Custom trusted vendor list (`trusted_vendors`)
+  - Temporary vendor trust via `--trust-vendor` flag
+- **Parallel processing** - 2-3x faster scans on multi-core systems
+  - Enable with `--fast` flag
+  - Thread pool execution with up to 8 concurrent workers
+  - Shows real-time progress with app names
+- **New modules**
+  - `macos_trust/config.py` - Configuration management with PyYAML support
+  - `macos_trust/baseline.py` - Baseline tracking and diff functionality
+  - `macos_trust/context.py` - Context enrichment (App Store, Homebrew, age detection)
+- **Comprehensive test suite** - 24 new tests (47 total)
+  - Config validation and loading
+  - Baseline save/load/filter operations
+  - Context enrichment (quarantine parsing, Homebrew detection, App Store)
+  - Engine filtering with patterns
+  - Rules integration with config
+  - End-to-end workflow testing
+  - Test coverage: 49% overall, 95% on new baseline module
+
+### Changed
+- **Enhanced CLI** - 7 new command-line options
+  - `--config PATH` - Specify config file location
+  - `--save-baseline` - Save current scan as baseline
+  - `--baseline-file PATH` - Override baseline location
+  - `--diff` - Show only new/changed findings
+  - `--show-all` - Force full results (ignore baseline)
+  - `--trust-vendor TEAM_ID` - Temporarily trust vendor
+  - `--generate-config PATH` - Generate example config
+  - `--fast` - Enable parallel processing
+- **Risk assessment** - Context-aware scoring
+  - Trusted vendors downgrade findings from HIGH to MED
+  - Homebrew Cask apps no longer flagged as suspicious
+  - Helper tools properly categorized (not false alarms)
+  - Old/stable apps treated as lower risk
+- **Progress indicators** - Improved visibility
+  - Parallel mode shows app names and counts
+  - Real-time updates: "Analyzed ChatGPT (23/49)..."
+  - Clearer status messages
+- **Engine architecture** - Extensible filtering system
+  - Config parameter passed through scan pipeline
+  - `_apply_config_filters()` for centralized filtering
+  - Separate sequential and parallel analysis paths
+- **Documentation** - Significantly expanded
+  - "Reducing False Positives" section in README
+  - Configuration examples with common vendor Team IDs
+  - Usage examples for all new features
+  - `config.example.yaml` with inline documentation
+  - Updated command-line options reference
+
+### Fixed
+- Pylance type checking warnings resolved
+- Deprecation warning for `datetime.utcnow()` (now uses `datetime.now(UTC)`)
+- Progress bar display in parallel mode shows meaningful app names
+- Baseline diff mode correctly detects changed risk levels
+
+### Performance
+- Parallel scanning reduces total scan time by 50-70%
+- Config and baseline loading adds <0.2s overhead
+- Homebrew detection cached for entire scan session
+- Minimal impact on sequential scan performance
+
 ## [0.2.0] - 2026-02-05
 
 ### Added

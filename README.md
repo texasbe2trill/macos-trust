@@ -3,7 +3,7 @@
 [![macOS](https://img.shields.io/badge/macOS-10.15+-blue.svg)](https://www.apple.com/macos/)
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-23%20passed-success.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-47%20passed-success.svg)](tests/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 **Security audit tool for macOS applications and persistence mechanisms**
@@ -31,6 +31,9 @@ pipx install git+https://github.com/texasbe2trill/macos-trust.git
 git clone https://github.com/texasbe2trill/macos-trust.git
 cd macos-trust
 pip install -e .
+
+# Optional: Install with config file support
+pip install -e ".[config]"  # Adds PyYAML for YAML configuration files
 ```
 
 ---
@@ -48,6 +51,9 @@ macos-trust --min-risk HIGH
 macos-trust --exclude-vendor UBF8T346G9  # Microsoft
 macos-trust --exclude-vendor 9BNSXJN65R  # Docker
 
+# Trust additional vendors for this scan
+macos-trust --trust-vendor H7H8Q7M5CK   # Postman
+
 # Organize findings by vendor
 macos-trust --group-by-vendor
 
@@ -56,6 +62,36 @@ macos-trust --json --out security-report.json
 
 # Show all findings including informational
 macos-trust --verbose
+
+# Speed up scans with parallel processing (2-3x faster)
+macos-trust --fast
+
+# === NEW: Baseline & Diff Mode ===
+# Save current scan as baseline
+macos-trust --save-baseline
+
+# Future scans with --diff show only NEW findings
+macos-trust --diff
+
+# Fresh scan ignoring baseline
+macos-trust --show-all
+macos-trust                # Shows only findings not in baseline
+
+# Force showing all findings (ignore baseline)
+macos-trust --show-all
+
+# === NEW: Configuration File ===
+# Generate example config file
+macos-trust --generate-config ~/.macos-trust.yaml
+
+# Or copy the example from the repo
+cp config.example.yaml ~/.macos-trust.yaml
+
+# Use custom config file
+macos-trust --config my-config.yaml
+# trust_homebrew_cask: true
+# ignore_patterns:
+#   - ".*:quarantined$"  # Ignore all quarantine warnings
 ```
 
 ---
@@ -159,6 +195,119 @@ Findings by Vendor (13 total)
 
 ---
 
+## Reducing False Positives
+
+Version 0.2 introduces powerful features to minimize false positive fatigue:
+
+### 1. **Baseline & Diff Mode** (Track Changes Over Time)
+Stop seeing the same findings repeatedly. Save your current state as a baseline, then future scans only show **new or changed** findings.
+
+```bash
+# First scan: save as baseline
+macos-trust --save-baseline
+
+# Future scans automatically show only NEW findings
+macos-trust
+
+# To see everything again
+macos-trust --show-all
+```
+
+**How it helps:** After initial review and acceptance of existing findings, you only see what's actually changed. Perfect for regular monitoring.
+
+### 2. **Configuration File** (Set It and Forget It)
+Stop passing the same CLI flags every time. Create `~/.macos-trust.yaml`:
+
+```yaml
+min_risk: HIGH                    # Only show critical issues
+exclude_vendors:
+  - UBF8T346G9                    # Microsoft
+  - 9BNSXJN65R                    # Docker
+trusted_vendors:
+  - H7H8Q7M5CK                    # Postman (downgrades their findings)
+trust_homebrew_cask: true         # Trust Homebrew Cask installs
+ignore_patterns:
+  - ".*:quarantined$"             # Suppress all quarantine warnings
+```
+
+**How it helps:** Persistent configuration means your preferences apply to every scan without repetition.
+
+### 3. **Quarantine Source Intelligence** (Context Matters)
+Not all quarantine warnings are equal. The tool now detects where files came from:
+
+- **Homebrew Cask**: `trust_homebrew_cask: true` suppresses quarantine warnings for package manager installs
+- **Mac App Store**: Automatically detected and trusted (Apple-vetted apps)
+- **Safari/Chrome/etc**: Identified in evidence for informed decisions
+
+**How it helps:** Apps from trusted sources like Homebrew or the App Store get appropriate risk levels.
+
+### 4. **Age-Based Trust** (Stability Matters)
+Apps installed 30+ days ago with no issues are likely safe:
+
+```yaml
+trust_old_apps: true
+old_app_days: 30
+```
+
+**How it helps:** Long-running stable apps get reduced risk scores, focusing attention on recent changes.
+
+### 5. **Custom Vendor Trust** (Your Environment, Your Rules)
+Add vendors you trust beyond the default list:
+
+```yaml
+trusted_vendors:
+  - H7H8Q7M5CK  # Postman
+  - LH6JV2ZBQ7  # Kobo
+```
+
+Or use CLI for one-time trust:
+```bash
+macos-trust --trust-vendor H7H8Q7M5CK
+```
+
+**How it helps:** Downgrades findings from vendors you know and trust from HIGH → MED or suppresses them entirely.
+
+### 6. **Pattern-Based Suppression** (Bulk Filtering)
+Suppress entire categories of findings with regex:
+
+```yaml
+ignore_patterns:
+  - ".*:quarantined$"              # All quarantine warnings
+  - "^persistence:user:.*"         # All user LaunchAgents
+  - "app:org\\.gimp\\..*"          # All GIMP-related findings
+```
+
+**How it helps:** One pattern can suppress dozens of similar low-priority findings.
+
+### Real-World Example
+
+**Before (v0.1):**
+```bash
+$ macos-trust
+🔍 33 findings (7 HIGH, 6 MED, 5 LOW, 15 INFO)
+# Same findings every scan, including legitimate apps
+```
+
+**After (v0.2 with config):**
+```bash
+$ macos-trust
+🔍 2 findings (1 HIGH, 1 MED)
+# Only new/changed findings from unknown sources
+```
+
+**Configuration used:**
+```yaml
+min_risk: MED
+trust_homebrew_cask: true
+trusted_vendors: [H7H8Q7M5CK, LH6JV2ZBQ7, QED4VVPZWA]
+exclude_vendors: [UBF8T346G9, 9BNSXJN65R]
+ignore_patterns: [".*:quarantined$"]
+```
+
+Plus baseline mode automatically filters out the 28 previously-reviewed findings.
+
+---
+
 ## What Gets Checked
 
 | Check | Description |
@@ -196,8 +345,17 @@ Options:
   --sarif PATH             Write SARIF 2.1.0 format to file (for CI/CD)
   --min-risk LEVEL         Filter by minimum risk level (INFO, LOW, MED, HIGH)
   --exclude-vendor TEAM_ID Exclude findings from specific vendor (repeatable)
+  --trust-vendor TEAM_ID   Trust additional vendor for this scan (repeatable)
   --verbose, -v            Show all findings including INFO level
   --group-by-vendor        Organize findings by vendor/developer
+  --config PATH            Path to config file (default: ~/.macos-trust.yaml)
+  --save-baseline          Save current scan as baseline
+  --baseline-file PATH     Path to baseline file (default: ~/.macos-trust/baseline.json)
+  --diff                   Show only new/changed findings since baseline
+  --show-all               Show all findings (ignore baseline)
+  --generate-config PATH   Generate example config file and exit
+  --fast                   Enable parallel processing for faster scans (2-3x faster)
+```
   --help                   Show this message and exit
 ```
 
@@ -221,7 +379,72 @@ macos-trust --sarif findings.sarif
 
 # SARIF with filtered results and human output to stdout
 macos-trust --min-risk MED --sarif security-report.sarif
+
+# Baseline workflow
+macos-trust --save-baseline              # First time: save baseline
+macos-trust                              # Later: shows only new findings
+macos-trust --show-all                   # Show everything regardless of baseline
+
+# Use configuration file
+macos-trust --config ~/.macos-trust.yaml
+
+# Trust Postman temporarily (just for this scan)
+macos-trust --trust-vendor H7H8Q7M5CK
 ```
+
+### Configuration File
+
+Create a configuration file at `~/.macos-trust.yaml` (or use `--config` to specify a different location).
+
+**Quick setup:**
+
+```bash
+# Option 1: Generate from template
+macos-trust --generate-config ~/.macos-trust.yaml
+
+# Option 2: Copy example from repo
+cp config.example.yaml ~/.macos-trust.yaml
+
+# Edit the file to customize for your needs
+nano ~/.macos-trust.yaml
+```
+
+**Configuration options** (see [`config.example.yaml`](config.example.yaml) for full documentation):
+
+```yaml
+# Minimum risk level to report (INFO, LOW, MED, HIGH)
+min_risk: MED
+
+# Vendor filtering
+exclude_vendors:
+  - UBF8T346G9  # Microsoft Corporation
+  - 9BNSXJN65R  # Docker Inc
+
+# Additional trusted vendors (downgrades their findings from HIGH to MED)
+trusted_vendors:
+  - H7H8Q7M5CK  # Postman
+  - VEKTX9H2N7  # GitHub
+
+# Suppress specific findings by ID
+ignore_findings:
+  - app:org.gimp.gimp:quarantined
+
+# Suppress findings matching regex patterns
+ignore_patterns:
+  - ".*:quarantined$"      # Ignore all quarantine warnings
+  - ".*:spctl_rejected$"   # Ignore helper tool rejections
+
+# Trust settings
+trust_homebrew_cask: true   # Trust Homebrew Cask downloads
+trust_app_store: true        # Trust Mac App Store apps
+trust_old_apps: true         # Trust apps installed >30 days ago
+old_app_days: 30
+
+# Baseline for diff mode
+baseline_file: ~/.macos-trust/baseline.json
+```
+
+See [`config.example.yaml`](config.example.yaml) for a comprehensive example with common vendor Team IDs and detailed explanations.
 
 ### SARIF Output
 
@@ -363,8 +586,8 @@ Findings from recognized vendors receive appropriate risk levels and context-spe
 
 ## Roadmap
 
-**Completed (v0.1):**
-- ✅ Context-aware risk scoring with vendor reputation
+**Completed (v0.2):**
+- ✅ Context-aware risk assessment with vendor reputation
 - ✅ CLI filtering by risk level and vendor
 - ✅ Vendor-specific recommendations
 - ✅ Grouped output by vendor/developer
@@ -376,17 +599,25 @@ Findings from recognized vendors receive appropriate risk levels and context-spe
 - ✅ GitHub Actions workflows for testing and security
 - ✅ Full contribution guidelines and issue templates
 - ✅ Security policy and vulnerability reporting
+- ✅ **Baseline & diff mode** – Track changes over time, show only new findings
+- ✅ **Configuration file support** – Persistent settings via YAML config
+- ✅ **Custom vendor whitelist** – Add trusted vendors via config or CLI
+- ✅ **Quarantine source intelligence** – Detect Homebrew Cask, App Store, Safari downloads
+- ✅ **App Store detection** – Auto-trust Mac App Store apps
+- ✅ **Age-based trust** – Reduce risk for apps stable >30 days
+- ✅ **Homebrew integration** – Detect and optionally trust Homebrew Cask installs
+- ✅ **Finding suppression** – Ignore specific findings or patterns via config
 
 **Planned (Future releases):**
-- Baseline & diff mode to track changes over time
-- Configuration file support (`~/.macos-trust.yaml`)
 - Performance improvements with parallel scanning
 - Entitlements analysis for permission auditing
 - Browser extension scanning
 - Kernel extension detection
-- Custom vendor whitelist management
 - HTML report generation with charts
 - Integration with macOS security frameworks
+- Signature timestamp validation for expired certificates
+- Launch item scheduling analysis (detect persistence timing patterns)
+- Network endpoint detection in launch items
 
 ---
 
