@@ -54,9 +54,14 @@ class TestConfig(unittest.TestCase):
         with self.assertRaises(ValueError):
             Config(ignore_patterns=["[invalid(regex"])
     
-    def test_load_config_no_file(self):
+    @patch('pathlib.Path.exists')
+    def test_load_config_no_file(self, mock_exists):
         """Test loading config when file doesn't exist."""
         from macos_trust.config import load_config
+        
+        # Mock: file doesn't exist
+        mock_exists.return_value = False
+        
         # When explicit path provided that doesn't exist, raises error
         with self.assertRaises(FileNotFoundError):
             config = load_config("/nonexistent/path/config.yaml")
@@ -221,14 +226,11 @@ class TestContext(unittest.TestCase):
         mock_stat.return_value = Mock(st_mtime=recent_time)
         self.assertFalse(should_trust_by_age("/fake/path", threshold_days=30))
     
-    @patch('os.path.exists')
+    @patch('pathlib.Path.exists')
     def test_app_context_app_store_detection(self, mock_exists):
         """Test App Store detection."""
-        # Mock App Store app
-        def exists_side_effect(path):
-            return '_MASReceipt/receipt' in str(path)
-        
-        mock_exists.side_effect = exists_side_effect
+        # Mock App Store receipt exists
+        mock_exists.return_value = True
         
         context = AppContext("/Applications/Pages.app/Contents/MacOS/Pages")
         self.assertTrue(context.is_app_store)
