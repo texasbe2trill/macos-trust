@@ -94,17 +94,20 @@ def load_config(config_path: Path | str | None = None) -> Config:
     Returns:
         Config object with loaded settings (or defaults if no config found)
     """
-    if not HAS_YAML:
-        # If PyYAML not installed, return default config
-        return Config()
-    
-    # Determine config file path
+    # If explicit path provided, validate it exists first
     if config_path:
         path = Path(config_path).expanduser()
         if not path.exists():
             raise FileNotFoundError(f"Config file not found: {path}")
+        if not HAS_YAML:
+            raise RuntimeError("PyYAML is required to load config files. Install with: pip install pyyaml")
         config_file = path
     else:
+        # No explicit path provided
+        if not HAS_YAML:
+            # If PyYAML not installed, return default config
+            return Config()
+        
         # Check default locations
         default_paths = [
             Path.home() / ".macos-trust.yaml",
