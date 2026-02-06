@@ -54,21 +54,33 @@ class TestConfig(unittest.TestCase):
         with self.assertRaises(ValueError):
             Config(ignore_patterns=["[invalid(regex"])
     
-    @patch('pathlib.Path.exists')
-    def test_load_config_no_file(self, mock_exists):
-        """Test loading config when file doesn't exist."""
+    def test_load_config_explicit_missing_file(self):
+        """Test that load_config raises error when explicit path doesn't exist."""
         from macos_trust.config import load_config
+        import tempfile
+        import os
         
-        # Mock: file doesn't exist
-        mock_exists.return_value = False
+        # Create a truly nonexistent path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            nonexistent = os.path.join(tmpdir, "definitely", "does", "not", "exist", "config.yaml")
+            
+            # When explicit path provided that doesn't exist, raises error
+            with self.assertRaises(FileNotFoundError):
+                config = load_config(nonexistent)
+    
+    def test_load_config_no_yaml(self):
+        """Test that load_config returns default config when PyYAML not available."""
+        from macos_trust.config import load_config, HAS_YAML
         
-        # When explicit path provided that doesn't exist, raises error
-        with self.assertRaises(FileNotFoundError):
-            config = load_config("/nonexistent/path/config.yaml")
-        
-        # When no path provided and no default exists, returns default config
-        config = load_config(None)
-        self.assertEqual(config.min_risk, "MED")
+        if HAS_YAML:
+            # If YAML is installed, mock it as unavailable
+            with patch('macos_trust.config.HAS_YAML', False):
+                config = load_config(None)
+                self.assertEqual(config.min_risk, "MED")
+        else:
+            # If YAML not installed, test directly
+            config = load_config(None)
+            self.assertEqual(config.min_risk, "MED")
 
 
 class TestBaseline(unittest.TestCase):
