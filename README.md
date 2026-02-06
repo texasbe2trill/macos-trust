@@ -1,9 +1,9 @@
 # macos-trust
 
 [![macOS](https://img.shields.io/badge/macOS-10.15+-blue.svg)](https://www.apple.com/macos/)
-[![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-47%20passed-success.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-48%20passed-success.svg)](tests/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 **Security audit tool for macOS applications and persistence mechanisms**
@@ -624,7 +624,7 @@ Findings from recognized vendors receive appropriate risk levels and context-spe
 ## Requirements
 
 - **macOS 10.15 or later** (tested on macOS 15+)
-- **Python 3.10 or later**
+- **Python 3.11 or later**
 - Dependencies: `pydantic`, `typer`, `rich` (auto-installed)
 
 ---
