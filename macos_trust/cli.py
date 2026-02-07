@@ -16,8 +16,6 @@ from macos_trust.vendors import KNOWN_VENDORS
 from macos_trust.config import Config, load_config, save_example_config
 from macos_trust.baseline import Baseline
 
-__version__ = "0.4.1"
-
 
 def scan(
     json: bool = typer.Option(
@@ -316,29 +314,7 @@ def scan(
 
 def main() -> None:
     """Entry point for the CLI."""
-    app = typer.Typer(add_completion=False)
-    app.command()(scan)
-    
-    def version_callback(value: bool):
-        if value:
-            typer.echo(f"macos-trust version {__version__}")
-            raise typer.Exit()
-    
-    @app.callback()
-    def common(
-        version: Optional[bool] = typer.Option(
-            None,
-            "--version",
-            "-v",
-            callback=version_callback,
-            is_eager=True,
-            help="Show version and exit"
-        )
-    ):
-        """macOS Trust Scanner - Intelligent security scanning for macOS systems."""
-        pass
-    
-    app()
+    typer.run(scan)
 
 
 if __name__ == "__main__":
