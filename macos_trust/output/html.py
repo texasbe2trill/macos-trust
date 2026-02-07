@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Dict, Any, List
 from collections import Counter
 
+from macos_trust import __version__
+
 # HTML template with embedded CSS and Chart.js
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
@@ -678,7 +680,7 @@ def generate_html_report(findings: List[Dict[str, Any]], metadata: Dict[str, Any
     scan_date = metadata.get("timestamp", datetime.now().isoformat())
     if "T" in scan_date:
         scan_date = datetime.fromisoformat(scan_date.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M:%S")
-    tool_version = metadata.get("tool_version", "0.3.0")
+    tool_version = metadata.get("tool_version", __version__)
     
     # Render template
     html = HTML_TEMPLATE.format(

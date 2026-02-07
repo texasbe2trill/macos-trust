@@ -7,6 +7,7 @@ from typing import Optional
 
 import typer
 
+from macos_trust import __version__
 from macos_trust.engine import run_scan
 from macos_trust.output.render import render_human, render_json
 from macos_trust.output.sarif import write_sarif
@@ -15,8 +16,6 @@ from macos_trust.models import Risk
 from macos_trust.vendors import KNOWN_VENDORS
 from macos_trust.config import Config, load_config, save_example_config
 from macos_trust.baseline import Baseline
-
-__version__ = "0.4.1"
 
 
 def version_callback(value: bool):
