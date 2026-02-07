@@ -16,6 +16,15 @@ from macos_trust.vendors import KNOWN_VENDORS
 from macos_trust.config import Config, load_config, save_example_config
 from macos_trust.baseline import Baseline
 
+__version__ = "0.4.1"
+
+
+def version_callback(value: bool):
+    """Print version and exit."""
+    if value:
+        print(f"macos-trust version {__version__}")
+        raise typer.Exit()
+
 
 def scan(
     json: bool = typer.Option(
@@ -98,6 +107,13 @@ def scan(
         False,
         "--fast",
         help="Enable parallel processing for faster scans (uses more CPU)"
+    ),
+    version: Optional[bool] = typer.Option(
+        None,
+        "--version",
+        callback=version_callback,
+        is_eager=True,
+        help="Show version and exit"
     )
 ) -> None:
     """
