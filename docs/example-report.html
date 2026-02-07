@@ -1,0 +1,1081 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>macOS Trust Scanner Report</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 25px 80px rgba(0,0,0,0.35);
+            overflow: hidden;
+        }
+        
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 50px 40px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 60%);
+            animation: pulse 4s ease-in-out infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.5; }
+            50% { transform: scale(1.1); opacity: 0.8; }
+        }
+        
+        header h1 {
+            font-size: 2.8em;
+            margin-bottom: 12px;
+            font-weight: 700;
+            position: relative;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+        
+        header p {
+            font-size: 1.2em;
+            opacity: 0.95;
+            position: relative;
+        }
+        
+        .metadata {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            padding: 25px 40px;
+            background: linear-gradient(to right, #f8f9fa, #ffffff);
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .metadata-item {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .metadata-label {
+            font-size: 0.8em;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 6px;
+            font-weight: 600;
+        }
+        
+        .metadata-value {
+            font-size: 1.15em;
+            font-weight: 600;
+            color: #212529;
+        }
+        
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 25px;
+            padding: 45px 40px;
+            background: #ffffff;
+        }
+        
+        .summary-card {
+            background: white;
+            border-radius: 12px;
+            padding: 30px 20px;
+            text-align: center;
+            border: 2px solid #e9ecef;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .summary-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+        }
+        
+        .summary-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 15px 35px rgba(0,0,0,0.12);
+        }
+        
+        .summary-card.high {
+            border-color: #dc3545;
+            background: linear-gradient(to bottom, #fff5f5, #ffffff);
+        }
+        .summary-card.high::before { background: #dc3545; }
+        
+        .summary-card.med {
+            border-color: #ffc107;
+            background: linear-gradient(to bottom, #fffbf0, #ffffff);
+        }
+        .summary-card.med::before { background: #ffc107; }
+        
+        .summary-card.low {
+            border-color: #28a745;
+            background: linear-gradient(to bottom, #f0fff4, #ffffff);
+        }
+        .summary-card.low::before { background: #28a745; }
+        
+        .summary-card.info {
+            border-color: #17a2b8;
+            background: linear-gradient(to bottom, #f0f9ff, #ffffff);
+        }
+        .summary-card.info::before { background: #17a2b8; }
+        
+        .summary-number {
+            font-size: 3.5em;
+            font-weight: 800;
+            margin-bottom: 8px;
+            line-height: 1;
+        }
+        
+        .summary-card.high .summary-number { color: #dc3545; }
+        .summary-card.med .summary-number { color: #e6a700; }
+        .summary-card.low .summary-number { color: #28a745; }
+        .summary-card.info .summary-number { color: #17a2b8; }
+        
+        .summary-label {
+            font-size: 0.9em;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            font-weight: 600;
+        }
+        
+        .charts {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 30px;
+            padding: 45px 40px;
+            background: #f8f9fa;
+        }
+        
+        .chart-container {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            transition: all 0.3s ease;
+        }
+        
+        .chart-container:hover {
+            box-shadow: 0 8px 25px rgba(0,0,0,0.12);
+        }
+        
+        .chart-title {
+            font-size: 1.2em;
+            font-weight: 700;
+            margin-bottom: 20px;
+            color: #212529;
+            text-align: center;
+        }
+        
+        .chart-wrapper {
+            position: relative;
+            height: 280px;
+        }
+        
+        .findings {
+            padding: 45px 40px;
+        }
+        
+        .findings-header {
+            font-size: 2em;
+            font-weight: 700;
+            margin-bottom: 35px;
+            color: #212529;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .findings-header::after {
+            content: '';
+            flex: 1;
+            height: 2px;
+            background: linear-gradient(to right, #667eea, transparent);
+        }
+        
+        .finding {
+            background: white;
+            border-left: 5px solid #e9ecef;
+            border-radius: 12px;
+            padding: 25px 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 3px 12px rgba(0,0,0,0.06);
+            transition: all 0.3s ease;
+        }
+        
+        .finding:hover {
+            transform: translateX(8px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+        }
+        
+        .finding.high { border-left-color: #dc3545; }
+        .finding.med { border-left-color: #ffc107; }
+        .finding.low { border-left-color: #28a745; }
+        .finding.info { border-left-color: #17a2b8; }
+        
+        .finding-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 18px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        
+        .risk-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 14px;
+            border-radius: 25px;
+            font-size: 0.8em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .risk-badge.high {
+            background: linear-gradient(135deg, #dc3545, #c82333);
+            color: white;
+        }
+        
+        .risk-badge.med {
+            background: linear-gradient(135deg, #ffc107, #e6a700);
+            color: #212529;
+        }
+        
+        .risk-badge.low {
+            background: linear-gradient(135deg, #28a745, #218838);
+            color: white;
+        }
+        
+        .risk-badge.info {
+            background: linear-gradient(135deg, #17a2b8, #138496);
+            color: white;
+        }
+        
+        .finding-title {
+            font-size: 1.15em;
+            font-weight: 600;
+            color: #212529;
+            flex: 1;
+        }
+        
+        .category-badge {
+            background: #e9ecef;
+            color: #495057;
+            padding: 6px 14px;
+            border-radius: 25px;
+            font-size: 0.8em;
+            font-weight: 600;
+        }
+        
+        .finding-details {
+            margin-top: 18px;
+        }
+        
+        .detail-section {
+            margin-bottom: 16px;
+        }
+        
+        .detail-label {
+            font-weight: 700;
+            color: #495057;
+            margin-bottom: 6px;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .detail-value {
+            color: #6c757d;
+            line-height: 1.7;
+        }
+        
+        .code {
+            background: #f1f3f4;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
+            font-size: 0.88em;
+            color: #d63384;
+            word-break: break-all;
+        }
+        
+        .evidence-table {
+            margin-top: 12px;
+            width: 100%;
+            border-collapse: collapse;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #f8f9fa;
+        }
+        
+        .evidence-table td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .evidence-table tr:last-child td {
+            border-bottom: none;
+        }
+        
+        .evidence-table td:first-child {
+            font-weight: 600;
+            color: #495057;
+            width: 25%;
+            background: #f1f3f4;
+        }
+        
+        footer {
+            background: linear-gradient(135deg, #212529, #343a40);
+            color: white;
+            padding: 35px;
+            text-align: center;
+        }
+        
+        footer p {
+            opacity: 0.9;
+            margin-bottom: 8px;
+        }
+        
+        footer a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+            transition: color 0.2s;
+        }
+        
+        footer a:hover {
+            color: #8b9ff0;
+            text-decoration: underline;
+        }
+        
+        @media (max-width: 1200px) {
+            .charts {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+        
+        @media (max-width: 900px) {
+            .charts {
+                grid-template-columns: 1fr;
+            }
+            .summary {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        
+        @media (max-width: 600px) {
+            .summary {
+                grid-template-columns: 1fr;
+            }
+            header h1 {
+                font-size: 2em;
+            }
+            .findings-header {
+                font-size: 1.5em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔍 macOS Trust Scanner Report</h1>
+            <p>Comprehensive security audit results for your Mac</p>
+        </header>
+        
+        <div class="metadata">
+            <div class="metadata-item">
+                <span class="metadata-label">Host</span>
+                <span class="metadata-value">MacBook-Air</span>
+            </div>
+            <div class="metadata-item">
+                <span class="metadata-label">OS Version</span>
+                <span class="metadata-value">macOS 15.2 Sequoia</span>
+            </div>
+            <div class="metadata-item">
+                <span class="metadata-label">Architecture</span>
+                <span class="metadata-value">Apple Silicon (arm64)</span>
+            </div>
+            <div class="metadata-item">
+                <span class="metadata-label">Scan Date</span>
+                <span class="metadata-value">2026-02-07 11:45:00</span>
+            </div>
+        </div>
+        
+        <div class="summary">
+            <div class="summary-card high">
+                <div class="summary-number">4</div>
+                <div class="summary-label">High Risk</div>
+            </div>
+            <div class="summary-card med">
+                <div class="summary-number">6</div>
+                <div class="summary-label">Medium Risk</div>
+            </div>
+            <div class="summary-card low">
+                <div class="summary-number">3</div>
+                <div class="summary-label">Low Risk</div>
+            </div>
+            <div class="summary-card info">
+                <div class="summary-number">2</div>
+                <div class="summary-label">Informational</div>
+            </div>
+        </div>
+        
+        <div class="charts">
+            <div class="chart-container">
+                <div class="chart-title">Risk Distribution</div>
+                <div class="chart-wrapper">
+                    <canvas id="riskChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-container">
+                <div class="chart-title">Category Breakdown</div>
+                <div class="chart-wrapper">
+                    <canvas id="categoryChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-container">
+                <div class="chart-title">Top Vendors</div>
+                <div class="chart-wrapper">
+                    <canvas id="vendorChart"></canvas>
+                </div>
+            </div>
+        </div>
+        
+        <div class="findings">
+            <h2 class="findings-header">Detailed Findings (15)</h2>
+            
+            <!-- HIGH Risk Findings -->
+            <div class="finding high">
+                <div class="finding-header">
+                    <span class="risk-badge high">High</span>
+                    <span class="finding-title">Unsigned binary with persistence: JupyterLab</span>
+                    <span class="category-badge">persistence</span>
+                </div>
+                <div class="finding-details">
+                    <div class="detail-section">
+                        <div class="detail-label">Description</div>
+                        <div class="detail-value">macOS Gatekeeper has rejected this item. It has no usable code signature and is configured to run automatically at startup, creating a significant security risk.</div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Path</div>
+                        <div class="detail-value"><span class="code">/Users/user/Library/LaunchAgents/homebrew.mxcl.jupyterlab.plist</span></div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Evidence</div>
+                        <table class="evidence-table">
+                            <tr><td>spctl_status</td><td>rejected</td></tr>
+                            <tr><td>spctl_source</td><td>no usable signature</td></tr>
+                            <tr><td>codesign_status</td><td>code object is not signed at all</td></tr>
+                        </table>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Recommendation</div>
+                        <div class="detail-value">Do not run this item unless you explicitly trust the source. Consider using the official JupyterLab desktop app from jupyter.org which is properly signed.</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="finding high">
+                <div class="finding-header">
+                    <span class="risk-badge high">High</span>
+                    <span class="finding-title">Invalid code signature: ChatGPT</span>
+                    <span class="category-badge">app</span>
+                </div>
+                <div class="finding-details">
+                    <div class="detail-section">
+                        <div class="detail-label">Description</div>
+                        <div class="detail-value">Code signature verification failed for ChatGPT. This could indicate tampering, corruption, or a modified binary that no longer matches its original signature.</div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Path</div>
+                        <div class="detail-value"><span class="code">/Applications/ChatGPT.app/Contents/MacOS/ChatGPT</span></div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Evidence</div>
+                        <table class="evidence-table">
+                            <tr><td>codesign_status</td><td>fail</td></tr>
+                            <tr><td>codesign_team_id</td><td>2DC432GLL2</td></tr>
+                            <tr><td>vendor</td><td>OpenAI</td></tr>
+                        </table>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Recommendation</div>
+                        <div class="detail-value">Re-download ChatGPT from the official OpenAI website or Mac App Store. Delete the current installation before reinstalling.</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="finding high">
+                <div class="finding-header">
+                    <span class="risk-badge high">High</span>
+                    <span class="finding-title">Invalid code signature: Signal</span>
+                    <span class="category-badge">app</span>
+                </div>
+                <div class="finding-details">
+                    <div class="detail-section">
+                        <div class="detail-label">Description</div>
+                        <div class="detail-value">Code signature verification failed for Signal. The Electron framework resources have been modified since the app was signed.</div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Path</div>
+                        <div class="detail-value"><span class="code">/Applications/Signal.app/Contents/MacOS/Signal</span></div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Evidence</div>
+                        <table class="evidence-table">
+                            <tr><td>codesign_status</td><td>fail</td></tr>
+                            <tr><td>codesign_team_id</td><td>U68MSDN6DR</td></tr>
+                            <tr><td>vendor</td><td>Signal Messenger</td></tr>
+                        </table>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Recommendation</div>
+                        <div class="detail-value">Reinstall Signal from signal.org. For a secure messaging app, signature integrity is especially critical.</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="finding high">
+                <div class="finding-header">
+                    <span class="risk-badge high">High</span>
+                    <span class="finding-title">Unsigned daemon: com.docker.socket</span>
+                    <span class="category-badge">persistence</span>
+                </div>
+                <div class="finding-details">
+                    <div class="detail-section">
+                        <div class="detail-label">Description</div>
+                        <div class="detail-value">A privileged helper tool is running without a valid code signature. This daemon runs with elevated permissions.</div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Path</div>
+                        <div class="detail-value"><span class="code">/Library/LaunchDaemons/com.docker.socket.plist</span></div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Evidence</div>
+                        <table class="evidence-table">
+                            <tr><td>codesign_status</td><td>Permission denied</td></tr>
+                            <tr><td>spctl_status</td><td>unable to verify</td></tr>
+                        </table>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Recommendation</div>
+                        <div class="detail-value">Reinstall Docker Desktop from docker.com. If you no longer use Docker, remove it completely using their official uninstaller.</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- MEDIUM Risk Findings -->
+            <div class="finding med">
+                <div class="finding-header">
+                    <span class="risk-badge med">Medium</span>
+                    <span class="finding-title">Gatekeeper blocked: Zoom helper</span>
+                    <span class="category-badge">persistence</span>
+                </div>
+                <div class="finding-details">
+                    <div class="detail-section">
+                        <div class="detail-label">Description</div>
+                        <div class="detail-value">macOS Gatekeeper has blocked this Zoom helper utility. The code is validly signed but does not meet the requirements for execution as a standalone binary.</div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Path</div>
+                        <div class="detail-value"><span class="code">/Library/LaunchDaemons/us.zoom.ZoomDaemon.plist</span></div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Evidence</div>
+                        <table class="evidence-table">
+                            <tr><td>spctl_status</td><td>rejected</td></tr>
+                            <tr><td>spctl_source</td><td>Developer ID Application: Zoom Video Communications, Inc.</td></tr>
+                            <tr><td>spctl_team_id</td><td>BJ4HAAB9B3</td></tr>
+                        </table>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Recommendation</div>
+                        <div class="detail-value">This is a known helper utility for Zoom. Update to the latest version of Zoom which may resolve the issue.</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="finding med">
+                <div class="finding-header">
+                    <span class="risk-badge med">Medium</span>
+                    <span class="finding-title">Gatekeeper blocked: Microsoft AutoUpdate helper</span>
+                    <span class="category-badge">persistence</span>
+                </div>
+                <div class="finding-details">
+                    <div class="detail-section">
+                        <div class="detail-label">Description</div>
+                        <div class="detail-value">Microsoft AutoUpdate helper is signed by Microsoft but rejected by Gatekeeper for standalone execution.</div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Path</div>
+                        <div class="detail-value"><span class="code">/Library/LaunchDaemons/com.microsoft.autoupdate.helper.plist</span></div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Evidence</div>
+                        <table class="evidence-table">
+                            <tr><td>spctl_status</td><td>rejected</td></tr>
+                            <tr><td>spctl_source</td><td>Developer ID Application: Microsoft Corporation</td></tr>
+                            <tr><td>spctl_team_id</td><td>UBF8T346G9</td></tr>
+                        </table>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Recommendation</div>
+                        <div class="detail-value">This is a legitimate Microsoft component. Run Microsoft AutoUpdate to get the latest version which may resolve the issue.</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="finding med">
+                <div class="finding-header">
+                    <span class="risk-badge med">Medium</span>
+                    <span class="finding-title">Invalid code signature: Postman</span>
+                    <span class="category-badge">app</span>
+                </div>
+                <div class="finding-details">
+                    <div class="detail-section">
+                        <div class="detail-label">Description</div>
+                        <div class="detail-value">Code signature verification failed for Postman API client. Framework files have been modified.</div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Path</div>
+                        <div class="detail-value"><span class="code">/Applications/Postman.app/Contents/MacOS/Postman</span></div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Evidence</div>
+                        <table class="evidence-table">
+                            <tr><td>codesign_status</td><td>fail</td></tr>
+                            <tr><td>codesign_team_id</td><td>H7H8Q7M5CK</td></tr>
+                            <tr><td>vendor</td><td>Postman Inc.</td></tr>
+                        </table>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Recommendation</div>
+                        <div class="detail-value">Reinstall Postman from postman.com to restore signature integrity.</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="finding med">
+                <div class="finding-header">
+                    <span class="risk-badge med">Medium</span>
+                    <span class="finding-title">Invalid code signature: GPG Keychain</span>
+                    <span class="category-badge">app</span>
+                </div>
+                <div class="finding-details">
+                    <div class="detail-section">
+                        <div class="detail-label">Description</div>
+                        <div class="detail-value">GPG Keychain has an invalid code signature. The encryption tool's integrity cannot be verified.</div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Path</div>
+                        <div class="detail-value"><span class="code">/Applications/GPG Keychain.app/Contents/MacOS/GPG Keychain</span></div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Evidence</div>
+                        <table class="evidence-table">
+                            <tr><td>codesign_status</td><td>fail</td></tr>
+                            <tr><td>codesign_team_id</td><td>PKV8ZPD836</td></tr>
+                            <tr><td>vendor</td><td>GPGTools GmbH</td></tr>
+                        </table>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Recommendation</div>
+                        <div class="detail-value">Reinstall from gpgtools.org. For cryptographic software, signature integrity is critical.</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="finding med">
+                <div class="finding-header">
+                    <span class="risk-badge med">Medium</span>
+                    <span class="finding-title">Invalid code signature: Speedtest</span>
+                    <span class="category-badge">app</span>
+                </div>
+                <div class="finding-details">
+                    <div class="detail-section">
+                        <div class="detail-label">Description</div>
+                        <div class="detail-value">Ookla Speedtest app has framework files that don't match the original signature.</div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Path</div>
+                        <div class="detail-value"><span class="code">/Applications/Speedtest.app/Contents/MacOS/Speedtest</span></div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Evidence</div>
+                        <table class="evidence-table">
+                            <tr><td>codesign_status</td><td>fail</td></tr>
+                            <tr><td>codesign_team_id</td><td>HT7M5ALSQW</td></tr>
+                            <tr><td>vendor</td><td>Ookla</td></tr>
+                        </table>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Recommendation</div>
+                        <div class="detail-value">Reinstall from the Mac App Store or speedtest.net.</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="finding med">
+                <div class="finding-header">
+                    <span class="risk-badge med">Medium</span>
+                    <span class="finding-title">Invalid code signature: NextDNS</span>
+                    <span class="category-badge">app</span>
+                </div>
+                <div class="finding-details">
+                    <div class="detail-section">
+                        <div class="detail-label">Description</div>
+                        <div class="detail-value">NextDNS privacy tool has modified Swift framework files.</div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Path</div>
+                        <div class="detail-value"><span class="code">/Applications/NextDNS.app/Contents/MacOS/NextDNS</span></div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Evidence</div>
+                        <table class="evidence-table">
+                            <tr><td>codesign_status</td><td>fail</td></tr>
+                            <tr><td>codesign_team_id</td><td>2QTM96NR8V</td></tr>
+                            <tr><td>vendor</td><td>NextDNS Inc.</td></tr>
+                        </table>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Recommendation</div>
+                        <div class="detail-value">Reinstall from nextdns.io or the Mac App Store.</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- LOW Risk Findings -->
+            <div class="finding low">
+                <div class="finding-header">
+                    <span class="risk-badge low">Low</span>
+                    <span class="finding-title">App from identified developer: iTerm2</span>
+                    <span class="category-badge">app</span>
+                </div>
+                <div class="finding-details">
+                    <div class="detail-section">
+                        <div class="detail-label">Description</div>
+                        <div class="detail-value">iTerm2 is signed by an identified Apple developer but not downloaded from the Mac App Store. This is common for legitimate developer tools.</div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Path</div>
+                        <div class="detail-value"><span class="code">/Applications/iTerm.app/Contents/MacOS/iTerm2</span></div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Evidence</div>
+                        <table class="evidence-table">
+                            <tr><td>spctl_status</td><td>approved</td></tr>
+                            <tr><td>spctl_source</td><td>Developer ID Application: George Nachman</td></tr>
+                            <tr><td>notarized</td><td>yes</td></tr>
+                        </table>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Recommendation</div>
+                        <div class="detail-value">No action needed. iTerm2 is a well-known, trusted terminal application in the developer community.</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="finding low">
+                <div class="finding-header">
+                    <span class="risk-badge low">Low</span>
+                    <span class="finding-title">App from identified developer: Visual Studio Code</span>
+                    <span class="category-badge">app</span>
+                </div>
+                <div class="finding-details">
+                    <div class="detail-section">
+                        <div class="detail-label">Description</div>
+                        <div class="detail-value">Visual Studio Code is signed by Microsoft but distributed outside the Mac App Store.</div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Path</div>
+                        <div class="detail-value"><span class="code">/Applications/Visual Studio Code.app/Contents/MacOS/Electron</span></div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Evidence</div>
+                        <table class="evidence-table">
+                            <tr><td>spctl_status</td><td>approved</td></tr>
+                            <tr><td>spctl_source</td><td>Developer ID Application: Microsoft Corporation</td></tr>
+                            <tr><td>notarized</td><td>yes</td></tr>
+                        </table>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Recommendation</div>
+                        <div class="detail-value">No action needed. VS Code is a trusted development tool from Microsoft.</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="finding low">
+                <div class="finding-header">
+                    <span class="risk-badge low">Low</span>
+                    <span class="finding-title">Homebrew-installed utility: htop</span>
+                    <span class="category-badge">cli</span>
+                </div>
+                <div class="finding-details">
+                    <div class="detail-section">
+                        <div class="detail-label">Description</div>
+                        <div class="detail-value">htop is an unsigned command-line utility installed via Homebrew. This is normal for open-source CLI tools.</div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Path</div>
+                        <div class="detail-value"><span class="code">/opt/homebrew/bin/htop</span></div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Evidence</div>
+                        <table class="evidence-table">
+                            <tr><td>codesign_status</td><td>not signed</td></tr>
+                            <tr><td>install_source</td><td>Homebrew Cask</td></tr>
+                        </table>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Recommendation</div>
+                        <div class="detail-value">No action needed if you trust Homebrew. Keep Homebrew updated with <code>brew update &amp;&amp; brew upgrade</code>.</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- INFO Findings -->
+            <div class="finding info">
+                <div class="finding-header">
+                    <span class="risk-badge info">Info</span>
+                    <span class="finding-title">Apple-signed system application: Safari</span>
+                    <span class="category-badge">app</span>
+                </div>
+                <div class="finding-details">
+                    <div class="detail-section">
+                        <div class="detail-label">Description</div>
+                        <div class="detail-value">Safari is signed by Apple and is part of the core macOS system. All security checks passed.</div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Path</div>
+                        <div class="detail-value"><span class="code">/Applications/Safari.app/Contents/MacOS/Safari</span></div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Evidence</div>
+                        <table class="evidence-table">
+                            <tr><td>codesign_status</td><td>valid</td></tr>
+                            <tr><td>spctl_source</td><td>Apple System</td></tr>
+                            <tr><td>signed_by</td><td>Software Signing (Apple)</td></tr>
+                        </table>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Recommendation</div>
+                        <div class="detail-value">No action needed. This is a trusted Apple system application.</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="finding info">
+                <div class="finding-header">
+                    <span class="risk-badge info">Info</span>
+                    <span class="finding-title">App Store application: Xcode</span>
+                    <span class="category-badge">app</span>
+                </div>
+                <div class="finding-details">
+                    <div class="detail-section">
+                        <div class="detail-label">Description</div>
+                        <div class="detail-value">Xcode was downloaded from the Mac App Store and is signed by Apple. Maximum trust level.</div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Path</div>
+                        <div class="detail-value"><span class="code">/Applications/Xcode.app/Contents/MacOS/Xcode</span></div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Evidence</div>
+                        <table class="evidence-table">
+                            <tr><td>codesign_status</td><td>valid</td></tr>
+                            <tr><td>spctl_source</td><td>Mac App Store</td></tr>
+                            <tr><td>signed_by</td><td>Apple Inc.</td></tr>
+                        </table>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Recommendation</div>
+                        <div class="detail-value">No action needed. App Store apps are reviewed and signed by Apple.</div>
+                    </div>
+                </div>
+            </div>
+            
+        </div>
+        
+        <footer>
+            <p>Generated by <strong>macos-trust</strong> v0.3.0</p>
+            <p><a href="https://github.com/texasbe2trill/macos-trust" target="_blank">View on GitHub →</a></p>
+        </footer>
+    </div>
+    
+    <script>
+        // Risk Distribution Chart
+        const riskCtx = document.getElementById('riskChart').getContext('2d');
+        new Chart(riskCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['High Risk', 'Medium Risk', 'Low Risk', 'Informational'],
+                datasets: [{
+                    data: [4, 6, 3, 2],
+                    backgroundColor: [
+                        '#dc3545',
+                        '#ffc107',
+                        '#28a745',
+                        '#17a2b8'
+                    ],
+                    borderWidth: 3,
+                    borderColor: '#fff',
+                    hoverOffset: 8
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            padding: 20,
+                            font: {
+                                size: 12,
+                                weight: '500'
+                            },
+                            usePointStyle: true,
+                            pointStyle: 'circle'
+                        }
+                    }
+                },
+                cutout: '55%'
+            }
+        });
+        
+        // Category Chart
+        const categoryCtx = document.getElementById('categoryChart').getContext('2d');
+        new Chart(categoryCtx, {
+            type: 'bar',
+            data: {
+                labels: ['Applications', 'Persistence', 'CLI Tools'],
+                datasets: [{
+                    label: 'Findings',
+                    data: [10, 4, 1],
+                    backgroundColor: [
+                        'rgba(102, 126, 234, 0.85)',
+                        'rgba(118, 75, 162, 0.85)',
+                        'rgba(99, 102, 241, 0.85)'
+                    ],
+                    borderRadius: 8,
+                    borderSkipped: false
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            stepSize: 2,
+                            font: { size: 11 }
+                        },
+                        grid: {
+                            color: 'rgba(0,0,0,0.05)'
+                        }
+                    },
+                    x: {
+                        ticks: {
+                            font: { size: 11, weight: '500' }
+                        },
+                        grid: {
+                            display: false
+                        }
+                    }
+                }
+            }
+        });
+        
+        // Vendor Chart
+        const vendorCtx = document.getElementById('vendorChart').getContext('2d');
+        new Chart(vendorCtx, {
+            type: 'bar',
+            data: {
+                labels: ['Microsoft', 'Zoom', 'GPGTools', 'OpenAI', 'Signal'],
+                datasets: [{
+                    label: 'Findings',
+                    data: [2, 2, 2, 1, 1],
+                    backgroundColor: 'rgba(118, 75, 162, 0.85)',
+                    borderRadius: 8,
+                    borderSkipped: false
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                indexAxis: 'y',
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    x: {
+                        beginAtZero: true,
+                        ticks: {
+                            stepSize: 1,
+                            font: { size: 11 }
+                        },
+                        grid: {
+                            color: 'rgba(0,0,0,0.05)'
+                        }
+                    },
+                    y: {
+                        ticks: {
+                            font: { size: 12, weight: '500' }
+                        },
+                        grid: {
+                            display: false
+                        }
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
