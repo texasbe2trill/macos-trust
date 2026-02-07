@@ -16,7 +16,7 @@ from macos_trust.vendors import KNOWN_VENDORS
 from macos_trust.config import Config, load_config, save_example_config
 from macos_trust.baseline import Baseline
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 
 def scan(
