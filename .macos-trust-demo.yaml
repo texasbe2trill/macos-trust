@@ -1,0 +1,30 @@
+# Custom config for demo2.gif - show only ChatGPT finding
+
+# Show HIGH findings only
+min_risk: HIGH
+
+# Exclude vendors
+exclude_vendors:
+  - VEKTX9H2N7  # GitHub Desktop
+  - 2YJ64GUAVW  # JupyterLab  
+  - LH6JV2ZBQ7  # Kobo
+  - H7H8Q7M5CK  # Postman
+  - U68MSDN6DR  # Signal
+  - H7V7XYVQ7D  # iTerm2
+
+# Suppress specific finding IDs for persistence items
+ignore_findings:
+  - persistence:daemon:com.docker.vmnetd:spctl_rejected
+  - persistence:daemon:com.microsoft.autoupdate.helper:spctl_rejected
+  - persistence:daemon:com.microsoft.office.licensingV2.helper:spctl_rejected
+  - persistence:system:org.gpgtools.Libmacgpg.xpc:spctl_rejected
+  - persistence:daemon:us.zoom.ZoomDaemon:spctl_rejected
+  - persistence:user:homebrew.mxcl.jupyterlab:spctl_rejected
+  - persistence:system:org.gpgtools.macgpg2.fix:spctl_rejected
+  - persistence:system:org.gpgtools.macgpg2.shutdown-gpg-agent:spctl_rejected
+  - persistence:daemon:com.docker.socket:codesign_fail
+  - persistence:user:homebrew.mxcl.jupyterlab:codesign_fail
+  - persistence:system:org.gpgtools.macgpg2.fix:codesign_fail
+  - persistence:system:org.gpgtools.macgpg2.shutdown-gpg-agent:codesign_fail
+
+# Result: Only app:com.openai.chat:codesign_fail (ChatGPT) remains

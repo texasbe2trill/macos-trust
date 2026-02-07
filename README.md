@@ -10,7 +10,26 @@
 
 Instantly identify unsigned apps, Gatekeeper violations, and suspicious launch agents on your Mac. Smart risk scoring distinguishes between genuine security threats and legitimate helper tools from trusted vendors.
 
-![Demo](docs/demo.gif)
+### 📊 See the Difference
+
+**Before: Default scan showing all findings**  
+Every issue flagged, including legitimate apps from trusted vendors.
+
+![Raw Scan](docs/demo.gif)
+
+**After: Same system with custom config — 1 potential threat identified**  
+Filtered out 30 false positives using vendor trust lists and smart patterns.
+
+![Filtered Scan](docs/demo2.gif)
+
+**Track changes over time with baseline mode**  
+Save your current state, then see only new or changed findings in future scans.
+
+![Baseline Demo](docs/demo3.gif)
+
+> **The power of configuration:** Transform noisy scans into actionable intelligence. See [Reducing False Positives](#reducing-false-positives) to learn how.
+
+---
 
 ### Key Features
 
