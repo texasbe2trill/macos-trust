@@ -55,11 +55,28 @@ Unlike generic security scanners, **macos-trust understands macOS**:
 
 ## Installation
 
-```bash
-# Using pipx (recommended)
-pipx install git+https://github.com/texasbe2trill/macos-trust.git
+### Homebrew (Recommended)
 
-# Or with pip for development
+```bash
+# Add the tap and install
+brew tap texasbe2trill/tap
+brew install macos-trust
+
+# Verify installation
+macos-trust --version
+```
+
+### Using pipx
+
+```bash
+# Using pipx (isolated environment)
+pipx install git+https://github.com/texasbe2trill/macos-trust.git
+```
+
+### From Source (Development)
+
+```bash
+# Clone and install for development
 git clone https://github.com/texasbe2trill/macos-trust.git
 cd macos-trust
 pip install -e .
@@ -798,7 +815,7 @@ Add your own trusted vendors via [configuration file](#configuration-file) or `-
 
 - **macOS 10.15 or later** (tested on macOS 15+)
 - **Python 3.11 or later**
-- Dependencies: `pydantic`, `typer`, `rich` (auto-installed)
+- Dependencies: `typer`, `rich` (auto-installed)
 - Optional: `PyYAML` for configuration file support
 
 ---
