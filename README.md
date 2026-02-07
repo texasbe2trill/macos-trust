@@ -363,6 +363,7 @@ Usage: macos-trust [OPTIONS]
 Options:
   --json                    Output results in JSON format
   --out PATH               Write output to file instead of stdout
+  --html PATH              Generate interactive HTML report with charts
   --sarif PATH             Write SARIF 2.1.0 format to file (for CI/CD)
   --min-risk LEVEL         Filter by minimum risk level (INFO, LOW, MED, HIGH)
   --exclude-vendor TEAM_ID Exclude findings from specific vendor (repeatable)
@@ -398,6 +399,12 @@ macos-trust --json --min-risk HIGH --out report.json
 # Generate SARIF output for GitHub Advanced Security / security tools
 macos-trust --sarif findings.sarif
 
+# Generate interactive HTML report with charts
+macos-trust --html security-report.html
+
+# HTML report with filtering
+macos-trust --html report.html --min-risk HIGH --config ~/.macos-trust.yaml
+
 # SARIF with filtered results and human output to stdout
 macos-trust --min-risk MED --sarif security-report.sarif
 
@@ -412,6 +419,39 @@ macos-trust --config ~/.macos-trust.yaml
 # Trust Postman temporarily (just for this scan)
 macos-trust --trust-vendor H7H8Q7M5CK
 ```
+
+### HTML Reports
+
+Generate beautiful, interactive HTML reports with charts and visualizations. Perfect for sharing with stakeholders or embedding in documentation.
+
+**[View Live Example Report →](https://texasbe2trill.github.io/macos-trust/example-report.html)**
+
+Features:
+- 📊 **Interactive charts** - Risk distribution, category breakdown, top vendors
+- 🎨 **Color-coded findings** - Visual risk levels (HIGH = red, MED = yellow, etc.)
+- 🔍 **Detailed analysis** - Full evidence and recommendations for each finding
+- 📱 **Responsive design** - Works on desktop and mobile
+- 🚀 **Self-contained** - Single HTML file with embedded CSS and Chart.js
+
+```bash
+# Generate HTML report
+macos-trust --html security-report.html
+
+# With custom filtering
+macos-trust --html report.html --min-risk HIGH --config ~/.macos-trust.yaml
+
+# Combined outputs (HTML for humans, JSON for automation)
+macos-trust --html visual-report.html --json data.json
+```
+
+**Example output:**
+- Summary cards showing 1 HIGH, 0 MED, 0 LOW, 0 INFO findings
+- Doughnut chart for risk distribution
+- Bar chart for category breakdown  
+- Horizontal bar chart for top vendors
+- Color-coded detailed findings with full evidence
+
+---
 
 ### JSON Output
 
@@ -709,11 +749,11 @@ Add your own trusted vendors via [configuration file](#configuration-file) or `-
 - ✅ **Homebrew integration** – Detect and optionally trust Homebrew Cask installs
 - ✅ **Finding suppression** – Ignore specific findings or patterns via config
 - ✅ **Parallel processing** – 2-3x faster scans with `--fast` flag
+- ✅ **HTML report generation** – Interactive reports with charts and visualizations ([see example](https://texasbe2trill.github.io/macos-trust/example-report.html))
 
 **Planned (Next Features):**
 
 🚀 **High Priority:**
-- **HTML report generation with interactive charts** – Visual dashboards for risk trends, vendor distribution, and finding categories. Export shareable reports with graphs.
 - **Entitlements analysis for permission auditing** – Deep dive into what apps *can* do: camera, microphone, screen recording, full disk access, contacts. Reveal hidden permissions.
 - **Browser extension scanning** – Audit Chrome/Firefox/Safari extensions for suspicious permissions and behaviors. Fill a major security gap.
 

@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-02-07
+
+### Added
+- **Interactive HTML reports** - Beautiful, self-contained HTML reports with Chart.js visualizations
+  - Risk distribution doughnut chart showing HIGH/MED/LOW/INFO breakdown
+  - Category breakdown bar chart for finding types
+  - Top vendors horizontal bar chart for developer/vendor analysis
+  - Animated header with pulsing gradient effect
+  - Gradient accent bars on summary cards
+  - Responsive 3-column layout with tablet/mobile breakpoints
+  - Color-coded findings with gradient risk badges
+  - Export with `--html PATH` flag
+- **Enhanced example report** - Comprehensive showcase with all risk levels on GitHub Pages
+  - 15 sanitized demo findings across all severity levels
+  - Demonstrates full tool capabilities for new users
+  - Fixed chart rendering with proper height containers
+
+### Fixed
+- Vendor chart double-counting bug (was incrementing counters twice)
+- Chart.js rendering stability issues (added `maintainAspectRatio: false`)
+- Chart label truncation with fixed height containers
+
 ## [0.3.0] - 2026-02-06
 
 ### Added

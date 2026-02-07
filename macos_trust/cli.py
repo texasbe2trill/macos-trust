@@ -10,6 +10,7 @@ import typer
 from macos_trust.engine import run_scan
 from macos_trust.output.render import render_human, render_json
 from macos_trust.output.sarif import write_sarif
+from macos_trust.output.html import generate_html_report
 from macos_trust.models import Risk
 from macos_trust.vendors import KNOWN_VENDORS
 from macos_trust.config import Config, load_config, save_example_config
@@ -31,6 +32,11 @@ def scan(
         None,
         "--sarif",
         help="Write SARIF 2.1.0 format output to specified file"
+    ),
+    html: Optional[Path] = typer.Option(
+        None,
+        "--html",
+        help="Write interactive HTML report to specified file"
     ),
     min_risk: Optional[str] = typer.Option(
         None,
@@ -99,6 +105,7 @@ def scan(
     
     By default, outputs a human-readable report to stdout showing MED and HIGH risk findings.
     Use --json for machine-readable JSON output.
+    Use --html to generate an interactive HTML report with charts.
     Use --sarif to write SARIF 2.1.0 format for CI/CD integration.
     Use --out to write results to a file.
     Use --min-risk to filter by severity (e.g., --min-risk HIGH shows only HIGH).
@@ -118,6 +125,7 @@ def scan(
         macos-trust --exclude-vendor UBF8T346G9        # Exclude Microsoft findings
         macos-trust --group-by-vendor                  # Group by vendor
         macos-trust --json --out report.json           # Save JSON report
+        macos-trust --html security-report.html        # Generate interactive HTML report
         macos-trust --sarif findings.sarif             # Save SARIF report for CI/CD
         macos-trust --save-baseline                    # Save baseline
         macos-trust --diff                             # Show only new findings
@@ -252,6 +260,32 @@ def scan(
             print(f"✓ SARIF report written to {sarif}", file=sys.stderr)
         except Exception as e:
             print(f"SARIF output failed: {e}", file=sys.stderr)
+            sys.exit(3)
+    
+    # Write HTML output if requested
+    if html:
+        try:
+            # Ensure parent directory exists
+            if not html.parent.exists():
+                print(f"Error: Directory does not exist: {html.parent}", file=sys.stderr)
+                sys.exit(2)
+            
+            # Convert report to dict format for HTML generator
+            findings_dict = [f.model_dump() for f in filtered_report.findings]
+            metadata_dict = {
+                "hostname": filtered_report.host.hostname,
+                "os_version": filtered_report.host.os_version,
+                "arch": filtered_report.host.arch,
+                "timestamp": filtered_report.timestamp,
+                "tool_version": "0.3.0"
+            }
+            
+            generate_html_report(findings_dict, metadata_dict, html)
+            print(f"✓ HTML report written to {html}", file=sys.stderr)
+        except Exception as e:
+            print(f"HTML output failed: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
             sys.exit(3)
     
     # Write output to file or stdout
