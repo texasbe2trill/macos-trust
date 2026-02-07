@@ -1,6 +1,7 @@
 """Configuration file management for macos-trust."""
 
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -10,74 +11,39 @@ try:
 except ImportError:
     HAS_YAML = False
 
-from pydantic import BaseModel, Field, field_validator
 
-
-class Config(BaseModel):
+@dataclass
+class Config:
     """Configuration for macos-trust scanner."""
     
     # Risk filtering
-    min_risk: str = Field(default="MED", description="Minimum risk level to report")
+    min_risk: str = "MED"
     
     # Vendor filtering
-    exclude_vendors: list[str] = Field(
-        default_factory=list,
-        description="Team IDs of vendors to exclude from reporting"
-    )
-    
-    trusted_vendors: list[str] = Field(
-        default_factory=list,
-        description="Team IDs of additional trusted vendors (downgrades HIGH -> MED)"
-    )
+    exclude_vendors: list[str] = field(default_factory=list)
+    trusted_vendors: list[str] = field(default_factory=list)
     
     # Finding suppression
-    ignore_findings: list[str] = Field(
-        default_factory=list,
-        description="Specific finding IDs to ignore"
-    )
-    
-    ignore_patterns: list[str] = Field(
-        default_factory=list,
-        description="Regex patterns for findings to ignore"
-    )
+    ignore_findings: list[str] = field(default_factory=list)
+    ignore_patterns: list[str] = field(default_factory=list)
     
     # Baseline mode
-    baseline_file: str = Field(
-        default="~/.macos-trust/baseline.json",
-        description="Path to baseline file for diff mode"
-    )
+    baseline_file: str = "~/.macos-trust/baseline.json"
     
     # Source trust settings
-    trust_homebrew_cask: bool = Field(
-        default=False,
-        description="Trust apps installed via Homebrew Cask (downgrades quarantine warnings)"
-    )
+    trust_homebrew_cask: bool = False
+    trust_app_store: bool = True
+    trust_old_apps: bool = False
+    old_app_days: int = 30
     
-    trust_app_store: bool = Field(
-        default=True,
-        description="Trust apps from Mac App Store"
-    )
-    
-    trust_old_apps: bool = Field(
-        default=False,
-        description="Reduce risk for apps installed >30 days ago with no issues"
-    )
-    
-    old_app_days: int = Field(
-        default=30,
-        description="Number of days to consider an app 'old' and stable"
-    )
-    
-    @field_validator('ignore_patterns')
-    @classmethod
-    def validate_patterns(cls, v: list[str]) -> list[str]:
-        """Validate that ignore_patterns are valid regex."""
-        for pattern in v:
+    def __post_init__(self) -> None:
+        """Validate configuration after initialization."""
+        # Validate ignore_patterns are valid regex
+        for pattern in self.ignore_patterns:
             try:
                 re.compile(pattern)
             except re.error as e:
                 raise ValueError(f"Invalid regex pattern '{pattern}': {e}")
-        return v
 
 
 def load_config(config_path: Path | str | None = None) -> Config:

@@ -1,14 +1,10 @@
-annotated-types==0.7.0
 click==8.3.1
 coverage==7.13.3
 iniconfig==2.3.0
--e git+https://github.com/texasbe2trill/macos-trust.git@f0d4f25cfcb5245a523a444150a41724229391e2#egg=macos_trust
 markdown-it-py==4.0.0
 mdurl==0.1.2
 packaging==26.0
 pluggy==1.6.0
-pydantic==2.12.5
-pydantic_core==2.41.5
 Pygments==2.19.2
 pytest==9.0.2
 pytest-cov==7.0.0
@@ -16,5 +12,4 @@ PyYAML==6.0.3
 rich==14.3.2
 shellingham==1.5.4
 typer==0.21.1
-typing-inspection==0.4.2
 typing_extensions==4.15.0
