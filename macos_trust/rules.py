@@ -21,6 +21,7 @@ def analyze_app(
     codesign_result: dict | None = None,
     spctl_result: dict | None = None,
     quarantine_result: dict | None = None,
+    entitlements_result: dict | None = None,
     config: Config | None = None
 ) -> list[Finding]:
     """
@@ -31,6 +32,7 @@ def analyze_app(
         codesign_result: Result from collectors.codesign.codesign_verify()
         spctl_result: Result from collectors.spctl.spctl_assess()
         quarantine_result: Result from collectors.quarantine.get_quarantine()
+        entitlements_result: Result from collectors.entitlements.get_entitlements()
         config: Configuration for trust and risk adjustments
     
     Returns:
@@ -129,6 +131,44 @@ def analyze_app(
             team_id=team_id
         )
         findings.append(finding)
+    
+    # Rule 5: High-risk entitlements -> MED (or HIGH if unsigned/untrusted)
+    if entitlements_result and entitlements_result.get("status") == "ok":
+        high_risk_ents = entitlements_result.get("high_risk", [])
+        if high_risk_ents:
+            # Adjust risk based on signature and vendor trust
+            risk = Risk.HIGH
+            if is_signed and known_vendor:
+                risk = Risk.MED  # Known vendor with high-risk entitlements - still concerning but less critical
+            elif is_signed:
+                risk = Risk.MED  # At least it's signed
+            
+            finding = _create_high_risk_entitlements_finding(
+                app=app,
+                entitlements_result=entitlements_result,
+                finding_id=f"app:{app_id_base}:high_risk_entitlements",
+                risk=risk,
+                team_id=team_id
+            )
+            findings.append(finding)
+    
+    # Rule 6: Sensitive entitlements -> INFO (for awareness)
+    if entitlements_result and entitlements_result.get("status") == "ok":
+        sensitive_ents = entitlements_result.get("sensitive", [])
+        # Only report if there are sensitive entitlements and they're not all high-risk
+        # (high-risk already reported above)
+        high_risk_ents = entitlements_result.get("high_risk", [])
+        non_high_risk_sensitive = [e for e in sensitive_ents if e not in high_risk_ents]
+        
+        if non_high_risk_sensitive and len(non_high_risk_sensitive) >= 3:
+            # Only report if app has 3+ non-high-risk sensitive entitlements
+            finding = _create_sensitive_entitlements_finding(
+                app=app,
+                entitlements_result=entitlements_result,
+                finding_id=f"app:{app_id_base}:sensitive_entitlements",
+                team_id=team_id
+            )
+            findings.append(finding)
     
     return findings
 
@@ -507,3 +547,615 @@ def _create_verified_app_finding(
             "This application is fully verified and trusted. No action needed."
         )
     )
+
+
+def analyze_kext(kext: dict, config: Config | None = None) -> list[Finding]:
+    """
+    Analyze a kernel extension or system extension.
+    
+    Args:
+        kext: Kernel extension record from scanners.kext.scan_kexts()
+        config: Configuration for trust and risk adjustments
+    
+    Returns:
+        List of Finding objects for security issues detected
+    """
+    findings = []
+    
+    name = kext.get("name", "Unknown")
+    bundle_id = kext.get("bundle_id", name)
+    path = kext.get("path", "")
+    kext_type = kext.get("type", "kext")
+    location = kext.get("location", "library")
+    loaded = kext.get("loaded", False)
+    codesign_result = kext.get("codesign", {})
+    
+    # Skip system KEXTs in /System/Library/Extensions - these are Apple's and expected
+    if location == "system":
+        return findings
+    
+    # Extract team ID from codesign
+    team_id = codesign_result.get("team_id", "")
+    known_vendor = is_known_vendor(team_id) if team_id else False
+    
+    # Check if vendor is trusted via config
+    config_trusted_vendor = False
+    if config and team_id:
+        config_trusted_vendor = team_id in config.trusted_vendors
+    
+    # Base finding ID
+    finding_id_base = f"kext:{bundle_id}"
+    
+    # Check code signature
+    codesign_status = codesign_result.get("status", "unknown")
+    
+    # Only flag actual security issues:
+    # 1. Unsigned KEXTs (HIGH risk - kernel access without verification)
+    # 2. Invalid signatures (HIGH - tampering or corruption)
+    # Everything else is noise - properly signed third-party KEXTs are generally fine
+    
+    if codesign_status == "unsigned":
+        # Unsigned KEXT is HIGH risk (kernel-level access)
+        findings.append(_create_unsigned_kext_finding(
+            kext, finding_id_base, known_vendor, config_trusted_vendor
+        ))
+    elif codesign_status == "invalid":
+        # Invalid signature is HIGH risk
+        findings.append(_create_invalid_kext_finding(
+            kext, finding_id_base, known_vendor, config_trusted_vendor
+        ))
+    # Skip third-party and legacy KEXT findings - they're just noise
+    # Users have intentionally installed these, and they're properly signed
+    
+    return findings
+
+
+def _create_unsigned_kext_finding(
+    kext: dict,
+    finding_id_base: str,
+    known_vendor: bool,
+    config_trusted_vendor: bool
+) -> Finding:
+    """Create finding for unsigned kernel extension."""
+    name = kext.get("name", "Unknown")
+    path = kext.get("path", "")
+    kext_type = kext.get("type", "kext")
+    loaded = kext.get("loaded", False)
+    
+    type_label = "System Extension" if kext_type == "systemextension" else "Kernel Extension"
+    loaded_status = "loaded" if loaded else "not loaded"
+    
+    return Finding(
+        id=f"{finding_id_base}:unsigned",
+        category="kext",
+        risk=Risk.HIGH,
+        title=f"Unsigned {type_label}: {name}",
+        details=(
+            f"{type_label} '{name}' is not signed with a valid code signature. "
+            f"This extension is currently {loaded_status}. "
+            f"Unsigned kernel extensions have full system access and pose significant security risks."
+        ),
+        path=path,
+        evidence={
+            "codesign_status": "unsigned",
+            "type": kext_type,
+            "loaded": loaded,
+        },
+        recommendation=(
+            f"Verify the source of this {type_label.lower()}. Unsigned kernel-level code "
+            "is a major security risk. Only install kernel extensions from verified sources. "
+            "Consider removing if not essential."
+        )
+    )
+
+
+def _create_invalid_kext_finding(
+    kext: dict,
+    finding_id_base: str,
+    known_vendor: bool,
+    config_trusted_vendor: bool
+) -> Finding:
+    """Create finding for kernel extension with invalid signature."""
+    name = kext.get("name", "Unknown")
+    path = kext.get("path", "")
+    kext_type = kext.get("type", "kext")
+    loaded = kext.get("loaded", False)
+    codesign_result = kext.get("codesign", {})
+    
+    type_label = "System Extension" if kext_type == "systemextension" else "Kernel Extension"
+    
+    return Finding(
+        id=f"{finding_id_base}:invalid_signature",
+        category="kext",
+        risk=Risk.HIGH,
+        title=f"Invalid signature: {name}",
+        details=(
+            f"{type_label} '{name}' has an invalid code signature. "
+            "This could indicate tampering or corruption."
+        ),
+        path=path,
+        evidence={
+            "codesign_status": "invalid",
+            "codesign_message": codesign_result.get("message", ""),
+            "type": kext_type,
+            "loaded": loaded,
+        },
+        recommendation=(
+            "This kernel extension's signature is invalid. This is a serious security concern. "
+            "Reinstall the parent application or driver, or remove if no longer needed."
+        )
+    )
+
+
+def _create_thirdparty_kext_finding(
+    kext: dict,
+    finding_id_base: str,
+    risk: Risk,
+    known_vendor: bool,
+    config_trusted_vendor: bool
+) -> Finding:
+    """Create finding for third-party kernel extension."""
+    name = kext.get("name", "Unknown")
+    path = kext.get("path", "")
+    kext_type = kext.get("type", "kext")
+    loaded = kext.get("loaded", False)
+    codesign_result = kext.get("codesign", {})
+    team_id = codesign_result.get("team_id", "")
+    
+    type_label = "System Extension" if kext_type == "systemextension" else "Kernel Extension"
+    vendor_info = get_vendor_name(team_id) if team_id and known_vendor else f"Team ID: {team_id}" if team_id else "Unknown vendor"
+    
+    return Finding(
+        id=f"{finding_id_base}:thirdparty",
+        category="kext",
+        risk=risk,
+        title=f"Third-party {type_label}: {name}",
+        details=(
+            f"{type_label} '{name}' from {vendor_info} is installed. "
+            f"This extension is {'currently loaded' if loaded else 'not currently loaded'}. "
+            "Third-party kernel extensions have deep system access."
+        ),
+        path=path,
+        evidence={
+            "codesign_status": codesign_result.get("status", "unknown"),
+            "team_id": team_id,
+            "vendor": vendor_info,
+            "type": kext_type,
+            "loaded": loaded,
+        },
+        recommendation=(
+            f"Review whether this {type_label.lower()} is necessary. "
+            "Kernel extensions from third parties have full system privileges. "
+            "Ensure it comes from a trusted source and is actively maintained."
+        )
+    )
+
+
+def _create_high_risk_entitlements_finding(
+    app: dict,
+    entitlements_result: dict,
+    finding_id: str,
+    risk: Risk = Risk.HIGH,
+    team_id: str = ""
+) -> Finding:
+    """Create a finding for high-risk entitlements."""
+    path = app.get("exec_path") or app.get("app_path", "")
+    name = app.get("name", "Unknown")
+    high_risk_ents = entitlements_result.get("high_risk", [])
+    sensitive_ents = entitlements_result.get("sensitive", [])
+    
+    # Build vendor-aware recommendation
+    recommendation = (
+        "Review whether this application needs these high-risk entitlements. "
+        "These permissions can be exploited for code injection, sandbox escape, or system compromise. "
+        "Remove if the application is untrusted or no longer needed."
+    )
+    
+    if team_id and is_known_vendor(team_id):
+        vendor_name = get_vendor_name(team_id)
+        recommendation = (
+            f"This application is from {vendor_name} (Team ID: {team_id}) and has high-risk entitlements. "
+            "While known vendors may legitimately need these permissions, verify the application is up to date "
+            f"and obtained from official {vendor_name} sources."
+        )
+    
+    high_risk_list = ", ".join(high_risk_ents)
+    
+    return Finding(
+        id=finding_id,
+        category="app",
+        risk=risk,
+        title=f"High-risk entitlements: {name}",
+        details=(
+            f"{name} has high-risk code signing entitlements: {high_risk_list}. "
+            "These permissions can be exploited to bypass security controls, inject code, or escape sandboxing."
+        ),
+        path=path,
+        evidence={
+            "high_risk_entitlements": high_risk_list,
+            "sensitive_entitlements": ", ".join(sensitive_ents),
+            "entitlements_count": str(entitlements_result.get("count", 0)),
+            "codesign_team_id": team_id,
+        },
+        recommendation=recommendation
+    )
+
+
+def _create_sensitive_entitlements_finding(
+    app: dict,
+    entitlements_result: dict,
+    finding_id: str,
+    team_id: str = ""
+) -> Finding:
+    """Create an INFO finding for sensitive entitlements (awareness)."""
+    path = app.get("exec_path") or app.get("app_path", "")
+    name = app.get("name", "Unknown")
+    sensitive_ents = entitlements_result.get("sensitive", [])
+    high_risk_ents = entitlements_result.get("high_risk", [])
+    
+    # Filter out high-risk from sensitive list (already reported)
+    non_high_risk_sensitive = [e for e in sensitive_ents if e not in high_risk_ents]
+    
+    sensitive_list = ", ".join(non_high_risk_sensitive)
+    
+    # Build vendor-aware recommendation
+    recommendation = (
+        "Review whether this application needs these sensitive permissions. "
+        "Ensure the application is from a trusted source and you understand why it needs these capabilities."
+    )
+    
+    if team_id and is_known_vendor(team_id):
+        vendor_name = get_vendor_name(team_id)
+        recommendation = (
+            f"This application from {vendor_name} (Team ID: {team_id}) has sensitive permissions. "
+            "This is informational - many legitimate applications need camera, microphone, or contact access. "
+            f"Verify you obtained this from official {vendor_name} sources."
+        )
+    
+    return Finding(
+        id=finding_id,
+        category="app",
+        risk=Risk.INFO,
+        title=f"Sensitive permissions: {name}",
+        details=(
+            f"{name} has requested sensitive system permissions: {sensitive_list}. "
+            "While many legitimate applications need these permissions, you should verify they're necessary."
+        ),
+        path=path,
+        evidence={
+            "sensitive_entitlements": sensitive_list,
+            "entitlements_count": str(entitlements_result.get("count", 0)),
+            "codesign_team_id": team_id,
+        },
+        recommendation=recommendation
+    )
+
+
+def _create_legacy_kext_finding(
+    kext: dict,
+    finding_id_base: str,
+    known_vendor: bool,
+    config_trusted_vendor: bool
+) -> Finding:
+    """Create info finding for loaded legacy KEXT."""
+    name = kext.get("name", "Unknown")
+    path = kext.get("path", "")
+    codesign_result = kext.get("codesign", {})
+    team_id = codesign_result.get("team_id", "")
+    vendor_info = get_vendor_name(team_id) if team_id and known_vendor else f"Team ID: {team_id}" if team_id else "Unknown vendor"
+    
+    return Finding(
+        id=f"{finding_id_base}:legacy",
+        category="kext",
+        risk=Risk.INFO,
+        title=f"Legacy KEXT loaded: {name}",
+        details=(
+            f"Legacy kernel extension '{name}' from {vendor_info} is currently loaded. "
+            "Apple has deprecated kernel extensions in favor of System Extensions. "
+            "This KEXT may stop working in future macOS versions."
+        ),
+        path=path,
+        evidence={
+            "codesign_status": codesign_result.get("status", "unknown"),
+            "team_id": team_id,
+            "vendor": vendor_info,
+            "type": "kext",
+            "loaded": True,
+        },
+        recommendation=(
+            "Check if the vendor provides a System Extension version. "
+            "Legacy KEXTs are deprecated and may not be supported in future macOS releases."
+        )
+    )
+
+
+# Suspicious browser extension permissions
+SUSPICIOUS_PERMISSIONS = {
+    "tabs": "Access browser tabs",
+    "history": "Access browsing history",
+    "cookies": "Access cookies",
+    "webRequest": "Intercept web requests",
+    "webRequestBlocking": "Block/modify web requests",
+    "proxy": "Control proxy settings",
+    "debugger": "Attach debugger to pages",
+    "management": "Manage other extensions",
+    "nativeMessaging": "Communicate with native apps",
+    "privacy": "Modify privacy settings",
+    "clipboardRead": "Read clipboard",
+    "clipboardWrite": "Write to clipboard",
+    "downloads": "Manage downloads",
+    "geolocation": "Access location",
+    "notifications": "Show notifications",
+}
+
+# High-risk permissions that are especially concerning
+HIGH_RISK_PERMISSIONS = {
+    "webRequestBlocking",  # Can intercept and modify all web traffic
+    "debugger",  # Can inject code into pages
+    "proxy",  # Can route all traffic through attacker
+    "management",  # Can disable security extensions
+    "nativeMessaging",  # Can execute native code
+    "privacy",  # Can weaken security settings
+}
+
+
+def analyze_browser_extension(
+    extension: dict,
+    config: Config | None = None
+) -> list[Finding]:
+    """
+    Analyze a browser extension and generate security findings.
+    
+    Args:
+        extension: Extension record from scanners.browser.scan_browser_extensions()
+        config: Configuration for trust and risk adjustments
+    
+    Returns:
+        List of Finding objects for security issues detected
+    """
+    findings = []
+    
+    # Generate base ID for this extension
+    browser = extension.get("browser", "unknown")
+    ext_id = extension.get("id", "unknown")
+    ext_id_base = f"browser_ext:{browser}:{ext_id}"
+    
+    permissions = extension.get("permissions", [])
+    host_permissions = extension.get("host_permissions", [])
+    
+    # Identify suspicious permissions
+    suspicious_perms = _identify_suspicious_extension_permissions(permissions)
+    high_risk_perms = _identify_high_risk_extension_permissions(permissions)
+    
+    # Rule 1: High-risk permissions -> HIGH
+    if high_risk_perms:
+        finding = _create_high_risk_extension_finding(
+            extension=extension,
+            finding_id=f"{ext_id_base}:high_risk_permissions",
+            high_risk_perms=high_risk_perms,
+            all_perms=permissions
+        )
+        findings.append(finding)
+    
+    # Rule 2: Broad host access -> MED
+    if _has_broad_host_access(host_permissions):
+        finding = _create_broad_access_extension_finding(
+            extension=extension,
+            finding_id=f"{ext_id_base}:broad_access",
+            host_permissions=host_permissions
+        )
+        findings.append(finding)
+    
+    # Rule 3: Multiple suspicious permissions -> MED
+    if len(suspicious_perms) >= 3:  # 3+ suspicious perms is concerning
+        finding = _create_suspicious_extension_finding(
+            extension=extension,
+            finding_id=f"{ext_id_base}:suspicious_permissions",
+            suspicious_perms=suspicious_perms
+        )
+        findings.append(finding)
+    
+    # Rule 4: Basic extension info -> INFO (for awareness)
+    if permissions or host_permissions:
+        finding = _create_extension_info_finding(
+            extension=extension,
+            finding_id=f"{ext_id_base}:info",
+            permissions=permissions,
+            host_permissions=host_permissions
+        )
+        findings.append(finding)
+    
+    return findings
+
+
+def _identify_suspicious_extension_permissions(permissions: List[str]) -> List[str]:
+    """Identify suspicious permissions from extension's permission list."""
+    suspicious = []
+    for perm in permissions:
+        if perm in SUSPICIOUS_PERMISSIONS:
+            suspicious.append(SUSPICIOUS_PERMISSIONS[perm])
+    return suspicious
+
+
+def _identify_high_risk_extension_permissions(permissions: List[str]) -> List[str]:
+    """Identify high-risk permissions from extension's permission list."""
+    high_risk = []
+    for perm in permissions:
+        if perm in HIGH_RISK_PERMISSIONS:
+            if perm in SUSPICIOUS_PERMISSIONS:
+                high_risk.append(SUSPICIOUS_PERMISSIONS[perm])
+            else:
+                high_risk.append(perm)
+    return high_risk
+
+
+def _has_broad_host_access(host_permissions: List[str]) -> bool:
+    """Check if extension has overly broad host access."""
+    broad_patterns = [
+        "<all_urls>",
+        "*://*/*",
+        "http://*/*",
+        "https://*/*",
+    ]
+    
+    for host in host_permissions:
+        if host in broad_patterns:
+            return True
+        # Check for wildcards in domain
+        if host.count("*") >= 2:  # Multiple wildcards like *://*.example.com/*
+            return True
+    
+    return False
+
+
+def _create_high_risk_extension_finding(
+    extension: dict,
+    finding_id: str,
+    high_risk_perms: List[str],
+    all_perms: List[str]
+) -> Finding:
+    """Create a finding for high-risk browser extension permissions."""
+    name = extension.get("name", "Unknown")
+    browser = extension.get("browser", "unknown").capitalize()
+    path = extension.get("manifest_path", "")
+    
+    perms_list = ", ".join(high_risk_perms)
+    
+    return Finding(
+        id=finding_id,
+        category="browser_extension",
+        risk=Risk.HIGH,
+        title=f"High-risk {browser} extension: {name}",
+        details=(
+            f"{browser} extension '{name}' has high-risk permissions: {perms_list}. "
+            "These permissions can be exploited to intercept web traffic, inject malicious code, "
+            "or compromise your browsing security."
+        ),
+        path=path,
+        evidence={
+            "browser": browser.lower(),
+            "extension_name": name,
+            "high_risk_permissions": perms_list,
+            "all_permissions": ", ".join(all_perms),
+            "extension_id": extension.get("id", ""),
+        },
+        recommendation=(
+            "Review whether this extension is necessary and from a trusted source. "
+            "Extensions with these permissions can intercept and modify all web traffic, "
+            "inject code into pages, or weaken security settings. "
+            "Remove if untrusted or no longer needed."
+        )
+    )
+
+
+def _create_broad_access_extension_finding(
+    extension: dict,
+    finding_id: str,
+    host_permissions: List[str]
+) -> Finding:
+    """Create a finding for browser extension with broad host access."""
+    name = extension.get("name", "Unknown")
+    browser = extension.get("browser", "unknown").capitalize()
+    path = extension.get("manifest_path", "")
+    
+    hosts_list = ", ".join(host_permissions[:5])  # First 5 hosts
+    if len(host_permissions) > 5:
+        hosts_list += f", ... ({len(host_permissions)} total)"
+    
+    return Finding(
+        id=finding_id,
+        category="browser_extension",
+        risk=Risk.MED,
+        title=f"Broad access {browser} extension: {name}",
+        details=(
+            f"{browser} extension '{name}' has access to all websites or very broad URL patterns. "
+            "This extension can read and modify content on any page you visit."
+        ),
+        path=path,
+        evidence={
+            "browser": browser.lower(),
+            "extension_name": name,
+            "host_permissions": hosts_list,
+            "extension_id": extension.get("id", ""),
+        },
+        recommendation=(
+            "Verify this extension is from a trusted source and review its privacy policy. "
+            "Extensions with broad host access can read passwords, credit card info, and "
+            "personal data from any website you visit."
+        )
+    )
+
+
+def _create_suspicious_extension_finding(
+    extension: dict,
+    finding_id: str,
+    suspicious_perms: List[str]
+) -> Finding:
+    """Create a finding for browser extension with multiple suspicious permissions."""
+    name = extension.get("name", "Unknown")
+    browser = extension.get("browser", "unknown").capitalize()
+    path = extension.get("manifest_path", "")
+    
+    perms_list = ", ".join(suspicious_perms)
+    
+    return Finding(
+        id=finding_id,
+        category="browser_extension",
+        risk=Risk.MED,
+        title=f"Suspicious {browser} extension: {name}",
+        details=(
+            f"{browser} extension '{name}' requests multiple sensitive permissions: {perms_list}. "
+            "The combination of these permissions could be used for tracking, data collection, or malicious activity."
+        ),
+        path=path,
+        evidence={
+            "browser": browser.lower(),
+            "extension_name": name,
+            "suspicious_permissions": perms_list,
+            "extension_id": extension.get("id", ""),
+        },
+        recommendation=(
+            "Review whether this extension needs all these permissions. "
+            "Consider alternatives with fewer permissions or remove if not essential."
+        )
+    )
+
+
+def _create_extension_info_finding(
+    extension: dict,
+    finding_id: str,
+    permissions: List[str],
+    host_permissions: List[str]
+) -> Finding:
+    """Create an INFO finding for browser extension (awareness)."""
+    name = extension.get("name", "Unknown")
+    browser = extension.get("browser", "unknown").capitalize()
+    path = extension.get("manifest_path", "")
+    version = extension.get("version", "unknown")
+    
+    perm_count = len(permissions) + len(host_permissions)
+    
+    return Finding(
+        id=finding_id,
+        category="browser_extension",
+        risk=Risk.INFO,
+        title=f"{browser} extension: {name}",
+        details=(
+            f"{browser} extension '{name}' (v{version}) is installed with {perm_count} permissions. "
+            "Browser extensions can access sensitive data and modify web pages."
+        ),
+        path=path,
+        evidence={
+            "browser": browser.lower(),
+            "extension_name": name,
+            "version": version,
+            "permissions": ", ".join(permissions) if permissions else "None",
+            "host_permissions": ", ".join(host_permissions[:3]) if host_permissions else "None",
+            "extension_id": extension.get("id", ""),
+        },
+        recommendation=(
+            "Periodically review installed browser extensions and remove those no longer needed. "
+            "Only install extensions from trusted sources."
+        )
+    )
+

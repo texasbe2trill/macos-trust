@@ -11,10 +11,13 @@ from macos_trust.models import ScanReport, Finding
 from macos_trust.util.host import get_host_info
 from macos_trust.scanners.apps import scan_applications
 from macos_trust.scanners.launchd import scan_launchd
+from macos_trust.scanners.kext import scan_kexts
+from macos_trust.scanners.browser import scan_browser_extensions
 from macos_trust.collectors.codesign import codesign_verify
 from macos_trust.collectors.spctl import spctl_assess
 from macos_trust.collectors.quarantine import get_quarantine
-from macos_trust.rules import analyze_app, analyze_launchd
+from macos_trust.collectors.entitlements import get_entitlements
+from macos_trust.rules import analyze_app, analyze_launchd, analyze_kext, analyze_browser_extension
 from macos_trust.config import Config
 
 
@@ -49,6 +52,14 @@ def run_scan(config: Config | None = None, parallel: bool = False) -> ScanReport
     # Scan launch agents/daemons
     launchd_findings = _scan_and_analyze_launchd(config, parallel=parallel)
     all_findings.extend(launchd_findings)
+    
+    # Scan kernel extensions
+    kext_findings = _scan_and_analyze_kexts(config, parallel=parallel)
+    all_findings.extend(kext_findings)
+    
+    # Scan browser extensions
+    browser_findings = _scan_and_analyze_browser_extensions(config)
+    all_findings.extend(browser_findings)
     
     # Apply config-based filtering
     if config:
@@ -228,6 +239,7 @@ def _analyze_single_app(app: dict, config: Config | None = None) -> list[Finding
     codesign_result = None
     spctl_result = None
     quarantine_result = None
+    entitlements_result = None
     
     try:
         codesign_result = codesign_verify(exec_path)
@@ -245,6 +257,11 @@ def _analyze_single_app(app: dict, config: Config | None = None) -> list[Finding
     except Exception:
         pass
     
+    try:
+        entitlements_result = get_entitlements(exec_path)
+    except Exception:
+        pass
+    
     # Apply rules to generate findings
     try:
         findings = analyze_app(
@@ -252,6 +269,7 @@ def _analyze_single_app(app: dict, config: Config | None = None) -> list[Finding
             codesign_result=codesign_result,
             spctl_result=spctl_result,
             quarantine_result=quarantine_result,
+            entitlements_result=entitlements_result,
             config=config
         )
         return findings
@@ -453,3 +471,178 @@ def _analyze_single_launchd(item: dict, config: Config | None = None) -> list[Fi
         return findings
     except Exception:
         return []
+
+
+def _scan_and_analyze_kexts(config: Config | None = None, parallel: bool = False) -> list[Finding]:
+    """
+    Scan kernel extensions and system extensions, then generate findings.
+    
+    Args:
+        config: Configuration for scan behavior
+        parallel: Enable parallel processing for faster scans
+    
+    Returns:
+        List of findings from kernel extension analysis
+    """
+    findings: list[Finding] = []
+    console = Console(stderr=True)
+    
+    # Scan for kernel extensions
+    try:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]Discovering kernel extensions..."),
+            console=console,
+            transient=False
+        ) as progress:
+            progress.add_task("scan", total=None)
+            kexts = scan_kexts()
+        console.print("[green]✓[/green] Found [bold]{} kernel/system extensions[/bold]".format(len(kexts)))
+    except Exception:
+        # If we can't scan KEXTs at all, return empty list
+        return findings
+    
+    if not kexts:
+        return findings
+    
+    # Analyze extensions with progress bar
+    if parallel:
+        findings = _analyze_kexts_parallel(kexts, config, console)
+    else:
+        findings = _analyze_kexts_sequential(kexts, config, console)
+    
+    console.print("[green]✓[/green] Kernel extension analysis complete\n")
+    return findings
+
+
+def _analyze_kexts_sequential(kexts: list[dict], config: Config | None, console: Console) -> list[Finding]:
+    """Analyze kernel extensions sequentially."""
+    findings: list[Finding] = []
+    
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold cyan]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeRemainingColumn(),
+        console=console,
+        transient=False
+    ) as progress:
+        task = progress.add_task(f"Analyzing kernel extensions...", total=len(kexts))
+        
+        for kext in kexts:
+            kext_name = kext.get('name', 'Unknown')
+            progress.update(task, description=f"Analyzing [cyan]{kext_name}[/cyan]...")
+            
+            try:
+                kext_findings = analyze_kext(kext, config=config)
+                findings.extend(kext_findings)
+            except Exception:
+                # Skip this kext if analysis fails
+                pass
+            
+            progress.advance(task)
+    
+    return findings
+
+
+def _analyze_kexts_parallel(kexts: list[dict], config: Config | None, console: Console) -> list[Finding]:
+    """Analyze kernel extensions in parallel using thread pool."""
+    findings: list[Finding] = []
+    max_workers = min(8, len(kexts))
+    completed = 0
+    
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold cyan]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeRemainingColumn(),
+        console=console,
+        transient=False
+    ) as progress:
+        task = progress.add_task(f"Analyzing {len(kexts)} kernel extensions...", total=len(kexts))
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_kext = {
+                executor.submit(analyze_kext, kext, config): kext
+                for kext in kexts
+            }
+            
+            for future in as_completed(future_to_kext):
+                kext = future_to_kext[future]
+                kext_name = kext.get('name', 'Unknown')
+                completed += 1
+                
+                # Update description to show last completed kext
+                progress.update(task, description=f"Analyzed [cyan]{kext_name}[/cyan] ({completed}/{len(kexts)})...")
+                
+                try:
+                    kext_findings = future.result()
+                    findings.extend(kext_findings)
+                except Exception:
+                    pass
+                
+                progress.advance(task)
+    
+    return findings
+
+
+def _scan_and_analyze_browser_extensions(config: Config | None = None) -> list[Finding]:
+    """
+    Scan browser extensions and generate findings.
+    
+    Args:
+        config: Configuration for scan behavior
+    
+    Returns:
+        List of findings from browser extension analysis
+    """
+    findings: list[Finding] = []
+    console = Console(stderr=True)
+    
+    # Scan for browser extensions
+    try:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]Discovering browser extensions..."),
+            console=console,
+            transient=False
+        ) as progress:
+            progress.add_task("scan", total=None)
+            extensions = scan_browser_extensions()
+        console.print("[green]✓[/green] Found [bold]{} browser extensions[/bold]".format(len(extensions)))
+    except Exception:
+        # If we can't scan extensions at all, return empty list
+        return findings
+    
+    if not extensions:
+        return findings
+    
+    # Analyze extensions with progress bar
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[bold cyan]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeRemainingColumn(),
+        console=console,
+        transient=False
+    ) as progress:
+        task = progress.add_task(f"Analyzing browser extensions...", total=len(extensions))
+        
+        for extension in extensions:
+            ext_name = extension.get('name', 'Unknown')
+            progress.update(task, description=f"Analyzing [cyan]{ext_name}[/cyan]...")
+            
+            try:
+                ext_findings = analyze_browser_extension(extension, config=config)
+                findings.extend(ext_findings)
+            except Exception:
+                # Skip this extension if analysis fails
+                pass
+            
+            progress.advance(task)
+    
+    console.print("[green]✓[/green] Browser extension analysis complete\n")
+    return findings

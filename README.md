@@ -3,7 +3,7 @@
 [![macOS](https://img.shields.io/badge/macOS-10.15+-blue.svg)](https://www.apple.com/macos/)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-48%20passed-success.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-59%20passed-success.svg)](tests/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 **Security audit tool for macOS applications and persistence mechanisms**
@@ -34,7 +34,9 @@ Save your current state, then see only new or changed findings in future scans.
 ### Key Features
 
 - **Context-aware risk assessment** – Known vendors get appropriate risk levels, not blanket HIGH warnings
-- **Comprehensive scanning** – Apps, LaunchAgents, LaunchDaemons, code signatures, Gatekeeper status
+- **Comprehensive scanning** – Apps, LaunchAgents, LaunchDaemons, kernel extensions (KEXTs), browser extensions (Chrome/Firefox/Safari), code signatures, Gatekeeper status, entitlements
+- **Permission auditing** – Reveals sensitive entitlements (camera, microphone, full disk access) and high-risk permissions (code injection, sandbox escapes)
+- **Browser extension analysis** – Identifies dangerous extension permissions across Chrome, Firefox, and Safari
 - **Flexible filtering** – Focus on what matters with `--min-risk`, `--exclude-vendor`, vendor grouping
 - **Beautiful terminal output** – Clear, color-coded findings with detailed analysis
 - **JSON export** – Machine-readable output for automation and CI/CD
@@ -47,9 +49,11 @@ Unlike generic security scanners, **macos-trust understands macOS**:
 - **Context-aware** – Recognizes 15+ major vendors (Microsoft, Docker, Zoom) with vendor-specific risk assessment
 - **Eliminate noise** – Baseline mode shows only changes, not 50 repeated findings every scan
 - **Fast** – Parallel processing delivers results 2-3x faster than sequential scanning
+- **Deep analysis** – Entitlements auditing reveals 24+ sensitive permissions and 7 high-risk capabilities per app
+- **Browser security** – Audit browser extensions across Chrome, Firefox, and Safari (including modern Web Extensions and legacy App Extensions)
 - **Zero false positives** – Proper config + baseline = only real threats surface
 - **Privacy-first** – 100% local analysis, no network calls, no telemetry, read-only operations
-- **Battle-tested** – 48 passing tests, used in production environments
+- **Battle-tested** – 59 passing tests, can be used in production environments
 
 ---
 
@@ -134,21 +138,112 @@ See [Command-Line Options](#command-line-options) for the complete reference.
 
 ---
 
+## Security Analysis Features
+
+### Entitlements Auditing
+
+Reveals what apps are **allowed** to do by analyzing code signing entitlements:
+
+**Sensitive Permissions Detected:**
+- Camera & Microphone Access
+- Full Disk Access
+- Location, Contacts, Calendar, Photos
+- Network Client/Server
+- Bluetooth & USB Devices
+- Apple Events Automation
+- Downloads & User Files Access
+
+**High-Risk Capabilities Flagged:**
+- JIT Code Execution
+- Unsigned Executable Memory (code injection vector)
+- Disabled Library Validation (malware can load unsigned libraries)
+- DYLD Environment Variables (library injection)
+- Task Inspection/Debug (should not be in production apps)
+- Sandbox Escapes & SIP Bypasses
+- TCC (Privacy) Bypasses
+
+Example findings:
+```
+🔴 HIGH | High-risk entitlements: Firefox
+Evidence: Disabled Library Validation, Unsigned Executable Memory
+
+🟡 MED | High-risk entitlements: Safari
+Evidence: JIT Code Execution
+
+ℹ️  INFO | Sensitive permissions: Microsoft Excel
+Evidence: Camera Access, Microphone Access, Contacts Access, USB Device Access
+```
+
+### Browser Extension Analysis
+
+Scans **Chrome, Firefox, and Safari** extensions for dangerous permissions:
+
+**Safari Extension Detection:**
+- ✅ **Modern Safari Web Extensions** - WebExtensions API format (Chrome/Firefox compatible)
+- ✅ **Legacy Safari App Extensions** - Native Safari extension format
+- ✅ **Automatic discovery** - Scans `/Applications/*/Contents/PlugIns/*.appex` bundles
+- ✅ **Permission parsing** - Extracts permissions from both `manifest.json` (Web Extensions) and `Info.plist` (App Extensions)
+
+**High-Risk Permissions:**
+- `webRequestBlocking` - Can intercept and modify all web traffic
+- `proxy` - Can route traffic through attacker-controlled server
+- `debugger` - Can inject malicious code into pages
+- `nativeMessaging` - Can execute native code on your system (bypass browser sandbox)
+- `management` - Can disable security extensions
+- `privacy` - Can weaken browser security settings
+- `<all_urls>` - Access to all websites (combine with other permissions for tracking)
+
+**Suspicious Patterns:**
+- Broad host access patterns (`<all_urls>`, `*://*/*`)
+- Combinations of tracking-capable permissions (tabs, history, cookies)
+- Multiple data access permissions together
+
+Example findings:
+```
+🔴 HIGH | High-risk Safari extension: Extension
+Evidence: nativeMessaging, <all_urls>, scripting
+Details: Can communicate with native apps and access all websites
+
+🔴 HIGH | High-risk Chrome extension: Ad Blocker Pro
+Evidence: webRequestBlocking, proxy
+Details: Can intercept and modify all web traffic, route through proxy
+
+🟡 MED | Broad access Firefox extension: AutoFill Plus
+Evidence: <all_urls>, cookies, tabs
+Details: Can read passwords and credit card info from any website
+
+ℹ️  INFO | Safari extension: Bear's Safari Extension
+Evidence: storage, activeTab, scripting
+Details: Standard extension with 5 permissions
+```
+
+---
+
 ## Example Output
 
 **Verbose mode with progress indicators:**
 
 ```
-❯ macos-trust --verbose
+❯ macos-trust --verbose --fast
 ⠋ Discovering applications...
 ✓ Found 56 applications
-  Analyzing Sid Meier's Civilization VII... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 0:00:00
+  Analyzed Microsoft PowerPoint (56/56)... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 0:00:00
 ✓ Application analysis complete
 
 ⠋ Discovering launch agents/daemons...
 ✓ Found 23 launch items
-  Analyzing com.microsoft.autoupdate.helper... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 0:00:00
+  Analyzed com.microsoft.update.agent (23/23)... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 0:00:00
 ✓ LaunchD analysis complete
+
+⠋ Discovering kernel extensions...
+✓ Found 676 kernel/system extensions
+  Analyzed AppleD1755PMU.kext (676/676)... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 0:00:00
+✓ Kernel extension analysis complete
+
+⠋ Discovering browser extensions...
+✓ Found 4 browser extensions
+  Analyzing Extension... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 0:00:00
+✓ Browser extension analysis complete
 ```
 
 **Standard scan output:**
@@ -356,6 +451,9 @@ Plus baseline mode automatically filters out the 28 previously-reviewed findings
 | **Launch Persistence** | Scans LaunchAgents and LaunchDaemons for auto-starting items |
 | **Privilege Escalation** | Flags system daemons executing from user-writable locations |
 | **Vendor Recognition** | Identifies helpers from trusted vendors (Docker, Microsoft, Zoom, etc.) |
+| **Kernel Extensions** | Detects legacy KEXTs and modern System Extensions with kernel-level access |
+| **Entitlements** | Audits 24+ sensitive permissions: camera, microphone, Full Disk Access, JIT execution, code injection vectors |
+| **Browser Extensions** | Scans Chrome, Firefox, and Safari (modern .appex + legacy .safariextension) for dangerous permissions |
 
 ---
 
@@ -767,16 +865,14 @@ Add your own trusted vendors via [configuration file](#configuration-file) or `-
 - ✅ **Finding suppression** – Ignore specific findings or patterns via config
 - ✅ **Parallel processing** – 2-3x faster scans with `--fast` flag
 - ✅ **HTML report generation** – Interactive reports with charts and visualizations ([see example](https://texasbe2trill.github.io/macos-trust/example-report.html))
+- ✅ **Kernel extension detection** – Scan for legacy KEXTs and modern System Extensions with kernel-level access
+- ✅ **Entitlements analysis** – Deep permission auditing revealing what apps *can* do: camera, microphone, full disk access, code injection, sandbox escapes
+- ✅ **Browser extension scanning** – Audit Chrome/Firefox/Safari extensions for dangerous permissions like webRequestBlocking, proxy control, and broad host access
 
 **Planned (Next Features):**
 
-🚀 **High Priority:**
-- **Entitlements analysis for permission auditing** – Deep dive into what apps *can* do: camera, microphone, screen recording, full disk access, contacts. Reveal hidden permissions.
-- **Browser extension scanning** – Audit Chrome/Firefox/Safari extensions for suspicious permissions and behaviors. Fill a major security gap.
-
 🎯 **Medium Priority:**
 - **Network endpoint detection in launch items** – Identify apps that phone home on startup. Privacy-focused analysis.
-- **Kernel extension detection** – Scan for legacy KEXTs and modern system extensions.
 - **Signature timestamp validation** – Detect expired certificates still in use.
 
 🔧 **Future Enhancements:**

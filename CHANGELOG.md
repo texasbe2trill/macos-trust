@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-02-08
+
+### Fixed
+- **Safari extension detection** - Completely rewrote Safari scanner to support modern macOS extensions
+  - Now scans `/Applications/*/Contents/PlugIns/*.appex` bundles instead of legacy `.safariextension` directories
+  - Supports both extension types:
+    - `com.apple.Safari.extension` (Legacy Safari App Extensions with native APIs)
+    - `com.apple.Safari.web-extension` (Modern Safari Web Extensions using WebExtensions API)
+  - Parses `Info.plist` for App Extensions (content scripts, extension handlers)
+  - Parses embedded `manifest.json` for Web Extensions (permissions, host patterns)
+  - Successfully detects installed Safari extensions including AdGuard, Bear, Noir
+  - Extracts permissions from both formats and flags high-risk capabilities (e.g., `nativeMessaging`)
+  
+### Changed
+- **Browser extension output** - Enhanced finding details for Safari extensions
+  - Added `extension_type` field ("web-extension" or "app-extension")
+  - Added `app_bundle` field showing parent application (e.g., "Bear.app")
+  - Improved permission extraction from Safari's `NSExtension` dictionary
+  - Example: "Safari web-extension from Bear.app" vs "Safari app-extension from AdGuard for Safari.app"
+
+### Documentation
+- Updated README with Safari-specific browser extension details
+- Added Safari extension examples to browser extension analysis section
+- Updated "What Gets Checked" table to mention Safari .appex support
+- Clarified browser extension capabilities across all three browsers
+- Updated example outputs to reflect actual Safari extension findings
+
 ## [0.4.0] - 2026-02-07
 
 ### Added

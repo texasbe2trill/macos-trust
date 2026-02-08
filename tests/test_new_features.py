@@ -17,7 +17,249 @@ from macos_trust.context import (
 )
 from macos_trust.models import Finding, Risk, ScanReport, HostInfo
 from macos_trust.engine import _apply_config_filters
-from macos_trust.rules import analyze_app, analyze_launchd
+from macos_trust.rules import analyze_app, analyze_launchd, analyze_browser_extension
+from macos_trust.collectors.entitlements import (
+    get_entitlements,
+    _identify_sensitive_entitlements,
+    _identify_high_risk_entitlements,
+    SENSITIVE_ENTITLEMENTS,
+    HIGH_RISK_ENTITLEMENTS
+)
+
+
+class TestEntitlements(unittest.TestCase):
+    """Test entitlements collector."""
+    
+    def test_identify_sensitive_entitlements(self):
+        """Test identification of sensitive entitlements."""
+        entitlements = {
+            "com.apple.security.device.camera": True,
+            "com.apple.security.device.microphone": True,
+            "com.apple.security.network.client": True,
+            "com.apple.security.app-sandbox": True,  # Not in sensitive list
+        }
+        
+        sensitive = _identify_sensitive_entitlements(entitlements)
+        
+        self.assertIn("Camera Access", sensitive)
+        self.assertIn("Microphone Access", sensitive)
+        self.assertIn("Network Client", sensitive)
+        self.assertEqual(len(sensitive), 3)
+    
+    def test_identify_high_risk_entitlements(self):
+        """Test identification of high-risk entitlements."""
+        entitlements = {
+            "com.apple.security.cs.allow-unsigned-executable-memory": True,
+            "com.apple.security.cs.disable-library-validation": True,
+            "com.apple.security.device.camera": True,  # Sensitive but not high-risk
+        }
+        
+        high_risk = _identify_high_risk_entitlements(entitlements)
+        
+        self.assertIn("Unsigned Executable Memory", high_risk)
+        self.assertIn("Disabled Library Validation", high_risk)
+        self.assertNotIn("Camera Access", high_risk)
+        self.assertEqual(len(high_risk), 2)
+    
+    def test_entitlements_false_values_ignored(self):
+        """Test that entitlements with False values are not counted."""
+        entitlements = {
+            "com.apple.security.device.camera": False,  # Explicitly disabled
+            "com.apple.security.device.microphone": True,
+        }
+        
+        sensitive = _identify_sensitive_entitlements(entitlements)
+        
+        self.assertNotIn("Camera Access", sensitive)
+        self.assertIn("Microphone Access", sensitive)
+        self.assertEqual(len(sensitive), 1)
+    
+    @patch('macos_trust.collectors.entitlements.run')
+    def test_get_entitlements_success(self, mock_run):
+        """Test successful entitlements extraction."""
+        # Mock codesign output with entitlements
+        mock_result = Mock()
+        mock_result.code = 0
+        mock_result.out = '''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.device.camera</key>
+    <true/>
+    <key>com.apple.security.network.client</key>
+    <true/>
+</dict>
+</plist>'''
+        mock_result.err = ""
+        mock_run.return_value = mock_result
+        
+        result = get_entitlements("/path/to/app")
+        
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["count"], 2)
+        self.assertIn("Camera Access", result["sensitive"])
+        self.assertIn("Network Client", result["sensitive"])
+    
+    @patch('macos_trust.collectors.entitlements.run')
+    def test_get_entitlements_none(self, mock_run):
+        """Test app with no entitlements."""
+        mock_result = Mock()
+        mock_result.code = 0
+        mock_result.out = ""
+        mock_result.err = ""
+        mock_run.return_value = mock_result
+        
+        result = get_entitlements("/path/to/app")
+        
+        self.assertEqual(result["status"], "none")
+        self.assertEqual(result["count"], 0)
+        self.assertEqual(len(result["sensitive"]), 0)
+    
+    @patch('macos_trust.collectors.entitlements.run')
+    def test_get_entitlements_error(self, mock_run):
+        """Test entitlements extraction error."""
+        mock_result = Mock()
+        mock_result.code = 1
+        mock_result.out = ""
+        mock_result.err = "no such file"
+        mock_run.return_value = mock_result
+        
+        result = get_entitlements("/path/to/nonexistent")
+        
+        self.assertEqual(result["status"], "error")
+
+
+class TestBrowserExtensions(unittest.TestCase):
+    """Test browser extension scanner and analysis."""
+    
+    def test_analyze_high_risk_extension(self):
+        """Test analysis of extension with high-risk permissions."""
+        extension = {
+            'browser': 'chrome',
+            'name': 'Suspicious Extension',
+            'id': 'abcdef123456',
+            'version': '1.0.0',
+            'manifest_path': '/path/to/manifest.json',
+            'permissions': ['webRequestBlocking', 'proxy', 'tabs'],
+            'host_permissions': ['<all_urls>'],
+        }
+        
+        findings = analyze_browser_extension(extension)
+        
+        # Should have multiple findings
+        self.assertGreater(len(findings), 0)
+        
+        # Should have HIGH risk finding for dangerous permissions
+        high_risk_findings = [f for f in findings if f.risk == Risk.HIGH]
+        self.assertEqual(len(high_risk_findings), 1)
+        
+        # Should have MED risk finding for broad access
+        med_risk_findings = [f for f in findings if f.risk == Risk.MED]
+        self.assertGreaterEqual(len(med_risk_findings), 1)
+    
+    def test_analyze_benign_extension(self):
+        """Test analysis of benign extension."""
+        extension = {
+            'browser': 'firefox',
+            'name': 'Weather Extension',
+            'id': 'weather@example.com',
+            'version': '2.0.0',
+            'manifest_path': '/path/to/manifest.json',
+            'permissions': ['storage'],
+            'host_permissions': ['https://weather.com/*'],
+        }
+        
+        findings = analyze_browser_extension(extension)
+        
+        # Should have only INFO level finding
+        self.assertGreater(len(findings), 0)
+        high_risk = [f for f in findings if f.risk == Risk.HIGH]
+        med_risk = [f for f in findings if f.risk == Risk.MED]
+        
+        self.assertEqual(len(high_risk), 0)
+        self.assertEqual(len(med_risk), 0)
+    
+    def test_analyze_broad_access_extension(self):
+        """Test analysis of extension with broad host access."""
+        extension = {
+            'browser': 'chrome',
+            'name': 'Content Blocker',
+            'id': 'blocker123',
+            'version': '3.0.0',
+            'manifest_path': '/path/to/manifest.json',
+            'permissions': ['storage'],
+            'host_permissions': ['*://*/*'],  # Broad access
+        }
+        
+        findings = analyze_browser_extension(extension)
+        
+        # Should have MED risk finding for broad access
+        med_risk_findings = [f for f in findings if f.risk == Risk.MED]
+        self.assertGreaterEqual(len(med_risk_findings), 1)
+        
+        # Check that broad access finding is present
+        broad_access = [f for f in med_risk_findings if 'Broad access' in f.title]
+        self.assertEqual(len(broad_access), 1)
+
+
+class TestEntitlementsRules(unittest.TestCase):
+    """Test entitlements analysis rules."""
+    
+    def test_app_with_high_risk_entitlements(self):
+        """Test app analysis with high-risk entitlements."""
+        app = {
+            'app_path': '/Applications/SuspiciousApp.app',
+            'exec_path': '/Applications/SuspiciousApp.app/Contents/MacOS/App',
+            'bundle_id': 'com.example.suspicious',
+            'name': 'SuspiciousApp'
+        }
+        
+        entitlements_result = {
+            'status': 'ok',
+            'entitlements': {
+                'com.apple.security.cs.allow-unsigned-executable-memory': True,
+                'com.apple.security.cs.disable-library-validation': True,
+            },
+            'sensitive': ['Unsigned Executable Memory', 'Disabled Library Validation'],
+            'high_risk': ['Unsigned Executable Memory', 'Disabled Library Validation'],
+            'count': 2
+        }
+        
+        findings = analyze_app(app, entitlements_result=entitlements_result)
+        
+        # Should have finding for high-risk entitlements
+        high_risk_findings = [f for f in findings if 'entitlements' in f.id and f.risk in (Risk.HIGH, Risk.MED)]
+        self.assertGreater(len(high_risk_findings), 0)
+    
+    def test_app_with_sensitive_entitlements_only(self):
+        """Test app with sensitive but not high-risk entitlements."""
+        app = {
+            'app_path': '/Applications/SafeApp.app',
+            'exec_path': '/Applications/SafeApp.app/Contents/MacOS/App',
+            'bundle_id': 'com.example.safe',
+            'name': 'SafeApp'
+        }
+        
+        entitlements_result = {
+            'status': 'ok',
+            'entitlements': {
+                'com.apple.security.device.camera': True,
+                'com.apple.security.device.microphone': True,
+                'com.apple.security.network.client': True,
+            },
+            'sensitive': ['Camera Access', 'Microphone Access', 'Network Client'],
+            'high_risk': [],
+            'count': 3
+        }
+        
+        codesign_result = {'status': 'ok', 'team_id': 'ABC123', 'authorities': ''}
+        
+        findings = analyze_app(app, codesign_result=codesign_result, entitlements_result=entitlements_result)
+        
+        # Should have INFO finding for sensitive permissions
+        sensitive_findings = [f for f in findings if 'sensitive_entitlements' in f.id]
+        self.assertGreater(len(sensitive_findings), 0)
+        self.assertEqual(sensitive_findings[0].risk, Risk.INFO)
 
 
 class TestConfig(unittest.TestCase):
