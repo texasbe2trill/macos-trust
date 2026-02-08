@@ -292,7 +292,7 @@ def scan(
                 "os_version": filtered_report.host.os_version,
                 "arch": filtered_report.host.arch,
                 "timestamp": filtered_report.timestamp,
-                "tool_version": "0.3.0"
+                "tool_version": __version__
             }
             
             generate_html_report(findings_dict, metadata_dict, html)
