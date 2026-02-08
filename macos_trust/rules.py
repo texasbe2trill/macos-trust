@@ -1,5 +1,7 @@
 """Security rules for generating findings from collected data."""
 
+from typing import List
+
 from macos_trust.models import Finding, Risk
 from macos_trust.vendors import (
     is_known_vendor,
